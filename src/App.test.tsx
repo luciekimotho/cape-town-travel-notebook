@@ -250,3 +250,97 @@ describe('remaining production surfaces', () => {
     expect(await db.expenses.get(original.id)).toMatchObject({date:'2026-09-22',amount:150})
   })
 })
+
+describe('form persistence and cancellation', () => {
+  it('cancels drafts from each primary form without writing them', async () => {
+    await renderApp()
+
+    fireEvent.click(screen.getByRole('button', { name:'Add activity' }))
+    fireEvent.change(screen.getByLabelText('Name *'), { target:{ value:'Cancelled itinerary activity' } })
+    fireEvent.click(screen.getByRole('button', { name:'Close Add activity' }))
+
+    fireEvent.click(screen.getByRole('button', { name:'Places' }))
+    fireEvent.click(screen.getByRole('button', { name:'Add place' }))
+    fireEvent.change(screen.getByLabelText('Name *'), { target:{ value:'Cancelled place' } })
+    fireEvent.click(screen.getByRole('button', { name:'Close Add activity' }))
+
+    fireEvent.click(screen.getByRole('button', { name:'Checklist' }))
+    fireEvent.click(screen.getByRole('button', { name:'Add reminder' }))
+    fireEvent.change(screen.getByLabelText('Reminder *'), { target:{ value:'Cancelled reminder' } })
+    fireEvent.click(screen.getByRole('button', { name:'Close Add reminder' }))
+
+    fireEvent.click(screen.getByRole('button', { name:'Costs' }))
+    fireEvent.click(screen.getByRole('button', { name:'Add expense' }))
+    fireEvent.change(screen.getByLabelText('Amount *'), { target:{ value:'900' } })
+    fireEvent.change(screen.getByLabelText('Category'), { target:{ value:'Cancelled cost' } })
+    fireEvent.click(screen.getByRole('button', { name:'Close Add expense' }))
+
+    fireEvent.click(screen.getByRole('button', { name:'Open settings' }))
+    fireEvent.change(screen.getByLabelText('KES per USD'), { target:{ value:'999' } })
+    fireEvent.click(screen.getByRole('button', { name:'Close Settings' }))
+
+    expect(await db.places.filter(place => place.name.startsWith('Cancelled')).count()).toBe(0)
+    expect(await db.checklist.filter(item => item.title.startsWith('Cancelled')).count()).toBe(0)
+    expect(await db.expenses.filter(expense => expense.category.startsWith('Cancelled')).count()).toBe(0)
+    expect(await db.rateSets.filter(rate => rate.active).count()).toBe(0)
+  })
+
+  it('saves place, expense, template schedule, and exchange-rate forms', async () => {
+    await renderApp()
+
+    fireEvent.click(screen.getByRole('button', { name:'Places' }))
+    fireEvent.click(screen.getByRole('button', { name:'Add place' }))
+    fireEvent.change(screen.getByLabelText('Name *'), { target:{ value:'Zeitz MOCAA' } })
+    fireEvent.click(screen.getByRole('button', { name:'Save activity' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(await db.places.filter(place => place.name === 'Zeitz MOCAA' && place.wantToVisit).count()).toBe(1)
+
+    fireEvent.click(screen.getByRole('button', { name:/Cape Peninsula Tour/ }))
+    fireEvent.change(screen.getByLabelText('Day'), { target:{ value:'2026-09-21' } })
+    fireEvent.click(screen.getByRole('button', { name:'Save activity' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect((await db.items.toArray()).filter(item => item.templateId === 'seed-template-cape-peninsula')).toHaveLength(10)
+
+    fireEvent.click(screen.getByRole('button', { name:'Costs' }))
+    fireEvent.click(screen.getByRole('button', { name:'Add expense' }))
+    fireEvent.change(screen.getByLabelText('Amount *'), { target:{ value:'900' } })
+    fireEvent.change(screen.getByLabelText('Category'), { target:{ value:'Transport' } })
+    fireEvent.click(screen.getByRole('button', { name:'Save expense' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(await db.expenses.filter(expense => expense.amount === 900 && expense.category === 'Transport').count()).toBe(1)
+
+    fireEvent.click(screen.getByRole('button', { name:'Open settings' }))
+    fireEvent.change(screen.getByLabelText('KES per USD'), { target:{ value:'130' } })
+    fireEvent.change(screen.getByLabelText('KES per ZAR'), { target:{ value:'7.1' } })
+    fireEvent.click(screen.getByRole('button', { name:'Activate rates' }))
+    await waitFor(async () => expect(await db.rateSets.filter(rate => rate.active).count()).toBe(1))
+    expect(await db.rateSets.filter(rate => rate.active && rate.kesPerUsd === 130 && rate.kesPerZar === 7.1).count()).toBe(1)
+  })
+
+  it('saves and cancels the Moment photo form without losing the stored photo', async () => {
+    await initializeDatabase()
+    const item = (await db.items.where('dayId').equals('2026-09-21').toArray()).find(candidate => candidate.parentId)!
+    const place = (await db.places.get(item.placeId))!
+    const createdAt = new Date().toISOString()
+    await db.items.update(item.id, { visited:true })
+    await db.stamps.add({ id:'photo-stamp', itineraryItemId:item.id, placeName:place.name, visitDate:'2026-09-21', detached:false, createdAt })
+    await db.photos.add({ id:'photo-entry', stampId:'photo-stamp', caption:'Original caption', mimeType:'image/jpeg', width:100, height:100, size:3, blob:new Blob(['jpg'], { type:'image/jpeg' }), createdAt, updatedAt:createdAt })
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test-photo')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+    await renderApp()
+
+    fireEvent.click(screen.getByRole('button', { name:'Moments' }))
+    fireEvent.click(screen.getAllByRole('button').find(button => button.textContent?.includes(place.name))!)
+    const momentsSection = screen.getByRole('heading', { name:'Moments' }).closest('section')!
+    fireEvent.click(within(momentsSection).getByRole('button', { name:'Edit' }))
+    fireEvent.change(screen.getByLabelText('Caption'), { target:{ value:'Saved caption' } })
+    fireEvent.click(screen.getByRole('button', { name:'Save photo' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect((await db.photos.get('photo-entry'))?.caption).toBe('Saved caption')
+
+    fireEvent.click(within(screen.getByRole('heading', { name:'Moments' }).closest('section')!).getByRole('button', { name:'Edit' }))
+    fireEvent.change(screen.getByLabelText('Caption'), { target:{ value:'Cancelled caption' } })
+    fireEvent.click(screen.getByRole('button', { name:'Close Moment' }))
+    expect((await db.photos.get('photo-entry'))?.caption).toBe('Saved caption')
+  })
+})
