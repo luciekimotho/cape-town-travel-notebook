@@ -48,6 +48,17 @@ describe('transient success notices', () => {
     act(() => vi.advanceTimersByTime(20_000))
     expect(dismiss).toHaveBeenCalledOnce()
   })
+
+  it('dismisses error messages after 20 seconds and exposes them as alerts', () => {
+    vi.useFakeTimers()
+    const dismiss = vi.fn()
+    render(<TransientNotice message="DataCloneError" version={1} tone="error" onDismiss={dismiss}/>)
+    expect(screen.getByRole('alert')).toHaveTextContent('DataCloneError')
+    act(() => vi.advanceTimersByTime(19_999))
+    expect(dismiss).not.toHaveBeenCalled()
+    act(() => vi.advanceTimersByTime(1))
+    expect(dismiss).toHaveBeenCalledOnce()
+  })
 })
 
 describe('whole-app navigation and settings', () => {

@@ -22,14 +22,14 @@ const money = (amount: number, currency: Currency) => new Intl.NumberFormat('en-
 const currencies: Currency[] = ['KES', 'USD', 'ZAR']
 interface SectionProps { data: AppData; commit: (fn: () => Promise<unknown>, success?: string) => Promise<boolean>; busy: boolean }
 
-export function TransientNotice({ message, version, onDismiss }: { message: string; version: number; onDismiss: () => void }) {
+export function TransientNotice({ message, version, onDismiss, tone = 'status' }: { message: string; version: number; onDismiss: () => void; tone?: 'status' | 'error' }) {
   const dismissRef = useRef(onDismiss)
   dismissRef.current = onDismiss
   useEffect(() => {
     const timer = window.setTimeout(() => dismissRef.current(), 20_000)
     return () => window.clearTimeout(timer)
   }, [message, version])
-  return <div className="message" role="status">{message}<button onClick={onDismiss} aria-label="Dismiss">×</button></div>
+  return <div className={`message ${tone === 'error' ? 'error' : ''}`} role={tone === 'error' ? 'alert' : 'status'}>{message}<button onClick={onDismiss} aria-label="Dismiss">×</button></div>
 }
 
 function Sheet({ open, title, onClose, children }: { open: boolean; title: string; onClose: () => void; children: ReactNode }) {
@@ -81,6 +81,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('itinerary')
   const [detail, setDetail] = useState<DetailRoute>()
   const [error, setError] = useState('')
+  const [errorVersion, setErrorVersion] = useState(0)
   const [notice, setNotice] = useState('')
   const [noticeVersion, setNoticeVersion] = useState(0)
   const [busy, setBusy] = useState(false)
@@ -89,7 +90,8 @@ export default function App() {
   const detailReturnRef = useRef<HTMLElement | null>(null)
   const refresh = async () => setData(await loadData())
 
-  useEffect(() => { initializeDatabase().then(refresh).catch(err => setError(String(err))) }, [])
+  const showError = (message: string) => { setError(message); setErrorVersion(version => version + 1) }
+  useEffect(() => { initializeDatabase().then(refresh).catch(err => showError(String(err))) }, [])
   const showNotice = (message: string) => { setNotice(message); setNoticeVersion(version => version + 1) }
   const commit = async (operation: () => Promise<unknown>, success?: string) => {
     setBusy(true); setError(''); setNotice('')
@@ -99,7 +101,7 @@ export default function App() {
       if (success) showNotice(success)
       return true
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'The change could not be saved. Please retry.')
+      showError(err instanceof Error ? err.message : 'The change could not be saved. Please retry.')
       return false
     } finally { setBusy(false) }
   }
@@ -114,13 +116,13 @@ export default function App() {
       link.click()
       URL.revokeObjectURL(link.href)
       showNotice('Backup created.')
-    } catch (err) { setError(err instanceof Error ? err.message : 'Export failed.') }
+    } catch (err) { showError(err instanceof Error ? err.message : 'Export failed.') }
     finally { setBusy(false) }
   }
   const selectRestore = async (file: File) => {
     setError(''); setBusy(true)
     try { setRestoreCandidate(await parseBackup(file)); setSettingsOpen(false) }
-    catch (err) { setError(err instanceof Error ? err.message : 'Restore validation failed.') }
+    catch (err) { showError(err instanceof Error ? err.message : 'Restore validation failed.') }
     finally { setBusy(false) }
   }
   const openItem = (itemId: string, origin: Tab, parentId?: string) => {
@@ -133,10 +135,10 @@ export default function App() {
     window.setTimeout(() => detailReturnRef.current?.focus(), 0)
   }
 
-  if (!data) return <main className="loading"><span className="stamp-mark">CT</span><p>Opening your notebook…</p>{error && <p role="alert">{error}</p>}</main>
+  if (!data) return <main className="loading"><span className="stamp-mark">CT</span><p>Opening your notebook…</p>{error && <TransientNotice message={error} version={errorVersion} tone="error" onDismiss={() => setError('')}/>}</main>
   return <div className="app-shell">
     {!detail && <header className="app-header"><div className="title-panel"><h1>Capetown 2026</h1><p>{formatTripRange(data.trip.startDate,data.trip.endDate)}</p></div><button className="settings-button" aria-label="Open settings" title="Settings" onClick={() => setSettingsOpen(true)}>⚙</button></header>}
-    {error && <div className="message error" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss">×</button></div>}
+    {error && <TransientNotice message={error} version={errorVersion} tone="error" onDismiss={() => setError('')}/>}
     {!error && notice && <TransientNotice message={notice} version={noticeVersion} onDismiss={() => setNotice('')}/>}
     {detail ? <ActivityDetail route={detail} data={data} commit={commit} busy={busy} onBack={backFromDetail} onOpenChild={childId => setDetail({ itemId: childId, origin: detail.origin, parentId: detail.itemId })}/> :
       <main className="app-main">
