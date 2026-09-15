@@ -23,9 +23,9 @@ export interface ItineraryItem {
 export interface ActivityTemplateStop { id: string; placeName: string; placeId?: string; notes: string[]; approximateMinutes?: number; optional?: boolean }
 export interface ActivityTemplate { id: string; name: string; description: string; stops: ActivityTemplateStop[]; seeded: boolean; createdAt: string; updatedAt: string }
 export interface RateSet { id: string; label: string; effectiveDate: string; kesPerKes: number; kesPerUsd: number; kesPerZar: number; active: boolean; example: boolean; createdAt: string }
-export interface Expense { id: string; amount: number; currency: Currency; date: string; category: string; note?: string; rateSetId?: string; createdAt: string; updatedAt: string }
+export interface Expense { id: string; amount: number; currency: Currency; date: string; category: string; note?: string; rateSetId?: string; itineraryItemId?: string; createdAt: string; updatedAt: string }
 export interface TravelStamp { id: string; itineraryItemId?: string; placeName: string; visitDate: string; detached: boolean; createdAt: string }
 export interface PhotoEntry { id: string; stampId: string; caption: string; mimeType: string; width: number; height: number; size: number; blob: Blob; createdAt: string; updatedAt: string }
 export interface AppMetadata { key: string; value: string }
 export interface AppData { trip: Trip; checklist: ChecklistItem[]; days: ItineraryDay[]; items: ItineraryItem[]; places: Place[]; activityTemplates: ActivityTemplate[]; expenses: Expense[]; stamps: TravelStamp[]; photos: PhotoEntry[]; rateSets: RateSet[]; metadata: AppMetadata[] }
-export interface BackupData { schemaVersion: 3; exportedAt: string; trip: Trip; checklist: ChecklistItem[]; days: ItineraryDay[]; items: ItineraryItem[]; places: Place[]; activityTemplates: ActivityTemplate[]; expenses: Expense[]; stamps: TravelStamp[]; photos: Omit<PhotoEntry, 'blob'>[]; rateSets: RateSet[]; metadata: AppMetadata[] }
+export interface BackupData { schemaVersion: 4; exportedAt: string; trip: Trip; checklist: ChecklistItem[]; days: ItineraryDay[]; items: ItineraryItem[]; places: Place[]; activityTemplates: ActivityTemplate[]; expenses: Expense[]; stamps: TravelStamp[]; photos: Omit<PhotoEntry, 'blob'>[]; rateSets: RateSet[]; metadata: AppMetadata[] }

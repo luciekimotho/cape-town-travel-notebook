@@ -23,3 +23,11 @@ The deployed app is hosted on GitHub Pages at:
 ## Data safety
 
 Browser storage can be cleared or evicted. Export ZIP backups regularly. Backup files are unencrypted and contain the notebook's stored photo previews, so keep them private.
+
+Trip details, manual exchange rates, and ZIP backup/restore are available from the Settings button in the app header. Each expense keeps the rate version active when it was recorded; later rate changes do not recalculate old expenses.
+
+## Install and offline use
+
+On the deployed HTTPS site, use the browser's **Add to Home Screen** or **Install app** action. The service worker caches the app shell for offline use, but Google Maps and other external pages still require a connection. Browser storage and offline-cache diagnostics are intentionally not shown in the personal app interface.
+
+Google Maps UI is deferred until the itinerary is finalized; existing stored map links remain in local data and backups.

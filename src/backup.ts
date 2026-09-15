@@ -6,7 +6,9 @@ const photoPath = (photo: Pick<PhotoEntry, 'id' | 'mimeType'>) => `photos/${phot
 
 export async function createBackup(data: AppData): Promise<Blob> {
   const zip = new JSZip()
-  const backup: BackupData = { schemaVersion: 3, exportedAt: new Date().toISOString(), trip: data.trip, checklist: data.checklist, days: data.days, items: data.items, places: data.places, activityTemplates: data.activityTemplates, expenses: data.expenses, stamps: data.stamps, photos: data.photos.map(({ blob: _blob, ...photo }) => photo), rateSets: data.rateSets, metadata: data.metadata }
+  const metadata = data.metadata.filter(entry => entry.key !== 'schemaVersion')
+  metadata.push({ key: 'schemaVersion', value: '4' })
+  const backup: BackupData = { schemaVersion: 4, exportedAt: new Date().toISOString(), trip: data.trip, checklist: data.checklist, days: data.days, items: data.items, places: data.places, activityTemplates: data.activityTemplates, expenses: data.expenses, stamps: data.stamps, photos: data.photos.map(({ blob: _blob, ...photo }) => photo), rateSets: data.rateSets, metadata }
   zip.file('notebook.json', JSON.stringify(backup, null, 2))
   data.photos.forEach(photo => zip.file(photoPath(photo), photo.blob))
   return zip.generateAsync({ type: 'blob', compression: 'DEFLATE' })
@@ -28,7 +30,7 @@ function validateRecords(backup: Partial<Omit<BackupData, 'schemaVersion'>>) {
       const stop = record(item)
       return isString(stop.id) && isString(stop.placeName) && Array.isArray(stop.notes) && stop.notes.every(isString)
     }) && isBoolean(value.seeded),
-    expenses: value => isString(value.id) && isNumber(value.amount) && value.amount >= 0 && ['KES','USD','ZAR'].includes(String(value.currency)) && isString(value.date) && isString(value.category),
+    expenses: value => isString(value.id) && isNumber(value.amount) && value.amount >= 0 && ['KES','USD','ZAR'].includes(String(value.currency)) && isString(value.date) && isString(value.category) && (value.itineraryItemId === undefined || isString(value.itineraryItemId)),
     stamps: value => isString(value.id) && isString(value.placeName) && isString(value.visitDate) && isBoolean(value.detached) && isString(value.createdAt),
     photos: value => isString(value.id) && isString(value.stampId) && isString(value.caption) && ['image/jpeg','image/png','image/webp'].includes(String(value.mimeType)) && isNumber(value.width) && isNumber(value.height) && isNumber(value.size),
     rateSets: value => isString(value.id) && isString(value.label) && isString(value.effectiveDate) && isNumber(value.kesPerKes) && isNumber(value.kesPerUsd) && isNumber(value.kesPerZar) && isBoolean(value.active) && isBoolean(value.example),
@@ -37,6 +39,12 @@ function validateRecords(backup: Partial<Omit<BackupData, 'schemaVersion'>>) {
   for (const key of arrays) {
     if (!backup[key]!.every(item => item && typeof item === 'object' && checks[key](record(item)))) {
       throw new Error(`Backup field "${key}" contains invalid records.`)
+    }
+    const linkedExpenseIds = backup.expenses!
+      .map(expense => expense.itineraryItemId)
+      .filter((id): id is string => id !== undefined)
+    if (new Set(linkedExpenseIds).size !== linkedExpenseIds.length) {
+      throw new Error('Backup contains more than one expense linked to the same itinerary item.')
     }
   }
 }
@@ -50,7 +58,7 @@ export async function parseBackup(file: File): Promise<AppData> {
   try { raw = JSON.parse(await jsonFile.async('text')) } catch { throw new Error('Backup JSON is invalid.') }
   if (!raw || typeof raw !== 'object') throw new Error('Backup data is invalid.')
   const backup = raw as Partial<Omit<BackupData, 'schemaVersion'>> & { schemaVersion?: number }
-  if (backup.schemaVersion !== 1 && backup.schemaVersion !== 2 && backup.schemaVersion !== 3) throw new Error('Unsupported backup version.')
+  if (backup.schemaVersion !== 1 && backup.schemaVersion !== 2 && backup.schemaVersion !== 3 && backup.schemaVersion !== 4) throw new Error('Unsupported backup version.')
   if (backup.schemaVersion === 1 && !('activityTemplates' in backup)) {
     backup.activityTemplates = []
   }
@@ -66,6 +74,8 @@ export async function parseBackup(file: File): Promise<AppData> {
     if (blob.size !== metadata.size) throw new Error(`Photo file for "${metadata.id}" has the wrong size.`)
     photos.push({ ...metadata, blob })
   }
-  return { trip: backup.trip, checklist: backup.checklist!, days: backup.days!, items: backup.items!, places: backup.places!, activityTemplates: backup.activityTemplates!, expenses: backup.expenses!, stamps: backup.stamps!, photos, rateSets: backup.rateSets!, metadata: backup.metadata! }
+  const metadata = backup.metadata!.filter(entry => entry.key !== 'schemaVersion')
+  metadata.push({ key: 'schemaVersion', value: '4' })
+  return { trip: backup.trip, checklist: backup.checklist!, days: backup.days!, items: backup.items!, places: backup.places!, activityTemplates: backup.activityTemplates!, expenses: backup.expenses!, stamps: backup.stamps!, photos, rateSets: backup.rateSets!, metadata }
 }
 export const restoreBackup = (data: AppData) => replaceAll(data)

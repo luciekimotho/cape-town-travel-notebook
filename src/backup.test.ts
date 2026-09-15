@@ -33,4 +33,46 @@ describe('ZIP backup validation', () => {
     const blob = await zip.generateAsync({ type:'blob' })
     await expect(parseBackup(new File([blob], 'bad-record.zip'))).rejects.toThrow('checklist')
   })
+
+  it('round-trips v4 itinerary expense links', async () => {
+    const linked = { ...data, expenses: [{ id:'expense-1',amount:50,currency:'USD' as const,date:'2026-09-22',category:'Activity',itineraryItemId:'item-1',createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z' }] }
+    const blob = await createBackup(linked)
+    const zip = await JSZip.loadAsync(blob)
+    expect(JSON.parse(await zip.file('notebook.json')!.async('text')).schemaVersion).toBe(4)
+    expect((await parseBackup(new File([blob], 'v4.zip'))).expenses[0].itineraryItemId).toBe('item-1')
+  })
+
+  it('restores a v3 backup without links and upgrades schema metadata', async () => {
+    const zip = new JSZip()
+    zip.file('notebook.json', JSON.stringify({
+      schemaVersion:3, exportedAt:'2026-01-01T00:00:00Z', ...data,
+      photos:[], expenses:[{ id:'legacy-expense',amount:20,currency:'KES',date:'2026-09-22',category:'Food',createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z' }],
+      metadata:[{ key:'schemaVersion',value:'3' }],
+    }))
+    const blob = await zip.generateAsync({ type:'blob' })
+    const parsed = await parseBackup(new File([blob], 'v3.zip'))
+    expect(parsed.expenses[0].itineraryItemId).toBeUndefined()
+    expect(parsed.metadata.find(entry => entry.key === 'schemaVersion')?.value).toBe('4')
+  })
+
+  it('rejects a non-string v4 expense link', async () => {
+    const zip = new JSZip()
+    zip.file('notebook.json', JSON.stringify({
+      schemaVersion:4, exportedAt:'2026-01-01T00:00:00Z', ...data, photos:[],
+      expenses:[{ id:'expense-1',amount:20,currency:'KES',date:'2026-09-22',category:'Activity',itineraryItemId:42,createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z' }],
+    }))
+    const blob = await zip.generateAsync({ type:'blob' })
+    await expect(parseBackup(new File([blob], 'invalid-link.zip'))).rejects.toThrow('expenses')
+  })
+
+  it('rejects duplicate v4 expense links before restore', async () => {
+    const zip = new JSZip()
+    const expense = { amount:20,currency:'KES',date:'2026-09-22',category:'Activity',itineraryItemId:'item-1',createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z' }
+    zip.file('notebook.json', JSON.stringify({
+      schemaVersion:4, exportedAt:'2026-01-01T00:00:00Z', ...data, photos:[],
+      expenses:[{ ...expense, id:'expense-1' }, { ...expense, id:'expense-2' }],
+    }))
+    const blob = await zip.generateAsync({ type:'blob' })
+    await expect(parseBackup(new File([blob], 'duplicate-link.zip'))).rejects.toThrow('more than one expense')
+  })
 })
