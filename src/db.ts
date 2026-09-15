@@ -120,6 +120,22 @@ async function ensureShoppingSeeds() {
   })
 }
 
+async function ensureChecklistCategories() {
+  await db.transaction('rw', [db.checklist, db.metadata], async () => {
+    if ((await db.metadata.get('checklistCategoriesV1'))?.value === 'complete') return
+    const starters = await db.checklist.toArray()
+    for (const item of starters) {
+      if (item.title === 'Create an offline backup' && item.note === 'Starter suggestion — verify for your trip.') {
+        await db.checklist.delete(item.id)
+      }
+      if (item.title === 'Pack a light rain layer' && item.category === 'Packing' && item.note === 'Starter suggestion — verify for your trip.') {
+        await db.checklist.update(item.id, { category:'Planning', updatedAt:now() })
+      }
+    }
+    await db.metadata.put({ key:'checklistCategoriesV1', value:'complete' })
+  })
+}
+
 async function ensureDatedItinerarySeeds() {
   await db.transaction('rw', [db.days, db.items, db.places, db.activityTemplates, db.metadata], async () => {
     if ((await db.metadata.get('datedItinerarySeedsV1'))?.value === 'complete') return
@@ -191,8 +207,8 @@ export async function initializeDatabase() {
     const timestamp = now()
     const trip: Trip = { id: 'current', destination: 'Cape Town, South Africa', travellers: 2, startDate: '2026-09-21', endDate: '2026-09-28', timezone: 'Africa/Johannesburg', notes: '', updatedAt: timestamp }
     const checklist: ChecklistItem[] = [
-      ['Review travel insurance', 'Documents'], ['Create an offline backup', 'Planning'],
-      ['Check passport validity', 'Documents'], ['Pack a light rain layer', 'Packing'],
+      ['Review travel insurance', 'Documents'], ['Check passport validity', 'Documents'],
+      ['Pack a light rain layer', 'Planning'],
     ].map(([title, category]) => ({ id: makeId(), title, category, completed: false, note: 'Starter suggestion — verify for your trip.', createdAt: timestamp, updatedAt: timestamp }))
     const days = datesBetween(trip.startDate, trip.endDate).map(date => ({ id: date, date, outOfRange: false }))
     const exampleRates: RateSet = { id: makeId(), label: 'Example rates — activate only after reviewing', effectiveDate: '2026-09-01', kesPerKes: 1, kesPerUsd: 129, kesPerZar: 7.2, active: false, example: true, createdAt: timestamp }
@@ -201,6 +217,7 @@ export async function initializeDatabase() {
   })
   await ensurePlanningSeeds()
   await ensureShoppingSeeds()
+  await ensureChecklistCategories()
   await ensureDatedItinerarySeeds()
   await db.metadata.put({ key: 'schemaVersion', value: '4' })
 }

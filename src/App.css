@@ -243,7 +243,18 @@ svg { display: block; }
 .plain-row small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
 .plain-row .amount { flex-shrink: 0; font-size: 14px; white-space: nowrap; }
 .checklist-row { padding: 8px 12px; }
+.checklist-section { margin-top: 14px; }
 .checklist-section + .checklist-section { margin-top: 18px; }
+.checklist-section summary {
+  min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 0 4px; color: var(--ink); cursor: pointer; list-style: none;
+}
+.checklist-section summary::-webkit-details-marker { display: none; }
+.checklist-section summary strong { font-size: 13px; font-weight: 650; }
+.checklist-section summary span { color: var(--muted); font-size: 11px; }
+.checklist-section summary::after { content: "⌄"; color: var(--teal); font-size: 20px; line-height: 1; transition: transform .18s ease; }
+.checklist-section[open] summary::after { transform: rotate(180deg); }
+.checklist-section summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 9px; }
 .check-toggle { width: 44px; min-width: 44px; height: 44px; padding: 0; color: var(--teal); background: transparent; border: 0; }
 .check-box { width: 23px; height: 23px; display: grid; place-items: center; margin: auto; color: white; border: 1px solid #acb7a2; border-radius: 7px; }
 .checked .check-box { background: var(--teal); border-color: var(--teal); }

@@ -26,6 +26,8 @@ describe('Phase 1 persistence', () => {
       'Cape Town Red Bus / Hop-On Hop-Off', 'Table Mountain', 'Cape Peninsula Tour',
     ]))
     expect(initial.activityTemplates.find(template => template.name === 'Cape Peninsula Tour')?.stops).toHaveLength(9)
+    expect(initial.checklist.some(item => item.title === 'Create an offline backup')).toBe(false)
+    expect(initial.checklist.find(item => item.title === 'Pack a light rain layer')?.category).toBe('Planning')
     await db.checklist.update(initial.checklist[0].id, { completed: true })
     expect((await loadData()).checklist.find(item => item.id === initial.checklist[0].id)?.completed).toBe(true)
   })

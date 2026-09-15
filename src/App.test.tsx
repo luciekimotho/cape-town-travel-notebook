@@ -201,15 +201,25 @@ describe('remaining production surfaces', () => {
   it('edits checklist reminders in an icon-action sheet', async () => {
     await renderApp()
     fireEvent.click(screen.getByRole('button', { name: 'Checklist' }))
+    expect(screen.queryByText('Preparation')).not.toBeInTheDocument()
+    expect(screen.queryByText('Create an offline backup')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('group').map(section => section.querySelector('summary')?.textContent)).toEqual([
+      'Planning0/1','Documents0/2','Shopping0/3',
+    ])
     expect(screen.getByText('Shopping')).toBeInTheDocument()
     expect(screen.getByText('Sneakers', { selector:'strong' })).toBeInTheDocument()
     expect(screen.getByText('Golf stuff', { selector:'strong' })).toBeInTheDocument()
     expect(screen.getByText("Kids' clothes", { selector:'strong' })).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Shopping', { selector:'strong' }))
+    expect(screen.queryByText('Sneakers', { selector:'strong' })).not.toBeVisible()
+    fireEvent.click(screen.getByText('Shopping', { selector:'strong' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add reminder' }))
     fireEvent.change(screen.getByLabelText('Reminder *'), { target: { value: 'Confirm museum day' } })
+    expect(screen.getByLabelText('Category')).toHaveDisplayValue('Planning')
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value:'Documents' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save reminder' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(await db.checklist.filter(item => item.title === 'Confirm museum day').count()).toBe(1)
+    expect(await db.checklist.filter(item => item.title === 'Confirm museum day').first()).toMatchObject({ category:'Documents' })
   })
 
   it('keeps a linked expense recorded date immutable from Costs', async () => {
