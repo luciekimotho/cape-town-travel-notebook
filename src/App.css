@@ -329,6 +329,9 @@ svg { display: block; }
 .form-actions svg { width: 23px; height: 23px; }
 .save-icon { color: var(--paper-card); background: var(--teal); border: 1px solid var(--teal); }
 .delete-icon { margin-right: auto; color: var(--pink); background: transparent; border: 1px solid #dcbbc0; }
+.reminder-actions { position: sticky; z-index: 2; bottom: -20px; display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 20px; padding: 14px 0 4px; background: #fff8eb; border-top: 1px solid var(--line); }
+.reminder-actions .danger { margin-right: auto; }
+.reminder-actions button { min-height: 48px; }
 .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .ghost, .danger { min-height: 44px; padding: 9px 14px; border-radius: 10px; font-weight: 700; }
 .ghost { color: var(--teal); background: transparent; border: 1px solid var(--line); }

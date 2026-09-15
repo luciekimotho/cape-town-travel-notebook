@@ -267,7 +267,7 @@ describe('form persistence and cancellation', () => {
     fireEvent.click(screen.getByRole('button', { name:'Checklist' }))
     fireEvent.click(screen.getByRole('button', { name:'Add reminder' }))
     fireEvent.change(screen.getByLabelText('Reminder *'), { target:{ value:'Cancelled reminder' } })
-    fireEvent.click(screen.getByRole('button', { name:'Close Add reminder' }))
+    fireEvent.click(screen.getByRole('button', { name:'Cancel' }))
 
     fireEvent.click(screen.getByRole('button', { name:'Costs' }))
     fireEvent.click(screen.getByRole('button', { name:'Add expense' }))
