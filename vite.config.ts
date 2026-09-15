@@ -9,8 +9,8 @@ export default defineConfig({
     registerType: 'autoUpdate',
     includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png'],
     manifest: {
-      name: 'Cape Town Travel Notebook',
-      short_name: 'Cape Town',
+      name: 'Capetown 2026',
+      short_name: 'Capetown',
       description: 'A private, local-first Cape Town travel notebook.',
       theme_color: '#008c95',
       background_color: '#fff4de',

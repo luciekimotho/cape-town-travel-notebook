@@ -36,7 +36,9 @@ describe('Phase 1 persistence', () => {
     const data = await loadData()
     expect(data.places.filter(place => place.seeded)).toHaveLength(14)
     expect(data.activityTemplates).toHaveLength(3)
-    expect(data.items).toHaveLength(0)
+    expect(data.items.filter(item => !item.parentId)).toHaveLength(8)
+    expect(data.items).toHaveLength(44)
+    expect(data.checklist.filter(item => item.category === 'Shopping').map(item => item.title).sort()).toEqual(['Golf stuff',"Kids' clothes",'Sneakers'])
     expect(data.activityTemplates.flatMap(template => template.stops).every(stop => stop.approximateMinutes === undefined || stop.approximateMinutes > 0)).toBe(true)
   })
 
@@ -53,11 +55,41 @@ describe('Phase 1 persistence', () => {
     const data = await loadData()
     const template = data.activityTemplates.find(item => item.name === 'Cape Peninsula Tour')!
     await materializeTemplate(template, '2026-09-24')
-    const scheduled = (await loadData()).items.filter(item => item.dayId === '2026-09-24')
+    const scheduled = (await loadData()).items.filter(item => item.dayId === '2026-09-24' && item.templateId === template.id)
     const parent = scheduled.find(item => item.isActivityGroup)
     expect(parent?.templateId).toBe(template.id)
     expect(scheduled.filter(item => item.parentId === parent?.id)).toHaveLength(9)
     expect(scheduled.filter(item => !item.parentId)).toHaveLength(1)
+  })
+
+  it('does not overwrite a shared place when customizing a single-stop template', async () => {
+    await initializeDatabase()
+    const sharedPlace = (await db.places.get('seed-place-table-mountain'))!
+    const timestamp = new Date().toISOString()
+    const template = {
+      id:'single-stop-template', name:'Mountain visit', description:'', seeded:false,
+      stops:[{ id:'single-stop', placeId:sharedPlace.id, placeName:sharedPlace.name, notes:[] }],
+      createdAt:timestamp, updatedAt:timestamp,
+    }
+    const item = await materializeTemplate(template, '2026-09-22', undefined, {
+      name:'Private cableway visit', address:'Custom meeting point', googleMapsUrl:'https://maps.example/custom',
+    })
+    expect(item.placeId).not.toBe(sharedPlace.id)
+    expect(await db.places.get(sharedPlace.id)).toEqual(sharedPlace)
+    expect(await db.places.get(item.placeId)).toMatchObject({
+      name:'Private cableway visit', address:'Custom meeting point', googleMapsUrl:'https://maps.example/custom',
+    })
+  })
+
+  it('moves a grouped activity through the shared editor without rewriting its expense snapshot', async () => {
+    await initializeDatabase()
+    const template = (await loadData()).activityTemplates.find(item => item.name === 'Cape Peninsula Tour')!
+    const parent = await materializeTemplate(template, '2026-09-22', { amount:80, currency:'USD' })
+    const originalExpense = (await db.expenses.where('itineraryItemId').equals(parent.id).first())!
+    await saveItineraryDetails(parent.id, { dayId:'2026-09-24' }, { amount:90, currency:'ZAR' })
+    expect((await db.items.get(parent.id))?.dayId).toBe('2026-09-24')
+    expect((await db.items.where('parentId').equals(parent.id).toArray()).every(child => child.dayId === '2026-09-24')).toBe(true)
+    expect(await db.expenses.get(originalExpense.id)).toMatchObject({ amount:90, currency:'ZAR', date:'2026-09-22', rateSetId:originalExpense.rateSetId })
   })
 
   it('preserves visited child stamps as detached memories when a tour is deleted', async () => {
@@ -75,6 +107,20 @@ describe('Phase 1 persistence', () => {
     const detached = await db.stamps.get('tour-stamp')
     expect(detached).toMatchObject({ detached: true })
     expect(detached).not.toHaveProperty('itineraryItemId')
+  })
+
+  it('preserves a group place while another itinerary item still references it', async () => {
+    await initializeDatabase()
+    const timestamp = new Date().toISOString()
+    const place: Place = { id:'shared-group-place', name:'Shared place', wantToVisit:false, createdAt:timestamp, updatedAt:timestamp }
+    await db.places.add(place)
+    await db.items.bulkAdd([
+      { id:'shared-group', dayId:'2026-09-22', placeId:place.id, isActivityGroup:true, visited:false, position:1, createdAt:timestamp, updatedAt:timestamp },
+      { id:'shared-standalone', dayId:'2026-09-23', placeId:place.id, visited:false, position:1, createdAt:timestamp, updatedAt:timestamp },
+    ])
+    await deleteItineraryGroup('shared-group')
+    expect(await db.places.get(place.id)).toEqual(place)
+    expect(await db.items.get('shared-standalone')).toBeTruthy()
   })
 
   it('preserves and flags days when trip dates are shortened', async () => {
@@ -208,8 +254,9 @@ describe('Phase 1 persistence', () => {
   it('rolls back scheduling and candidate changes when cost validation fails', async () => {
     await initializeDatabase()
     await db.places.update('seed-place-table-mountain', { wantToVisit:true })
+    const before = await db.items.where('placeId').equals('seed-place-table-mountain').count()
     await expect(scheduleCandidatePlace('seed-place-table-mountain', '2026-09-22', { amount:0, currency:'USD' })).rejects.toThrow('greater than zero')
-    expect(await db.items.where('placeId').equals('seed-place-table-mountain').count()).toBe(0)
+    expect(await db.items.where('placeId').equals('seed-place-table-mountain').count()).toBe(before)
     expect((await db.places.get('seed-place-table-mountain'))?.wantToVisit).toBe(true)
   })
 

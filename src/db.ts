@@ -100,6 +100,91 @@ async function ensurePlanningSeeds() {
   })
 }
 
+async function ensureShoppingSeeds() {
+  await db.transaction('rw', [db.checklist, db.metadata], async () => {
+    if ((await db.metadata.get('shoppingSeedsV1'))?.value === 'complete') return
+    const existing = await db.checklist.toArray()
+    const createdAt = now()
+    const shopping = [
+      ['seed-shopping-sneakers', 'Sneakers'],
+      ['seed-shopping-golf', 'Golf stuff'],
+      ['seed-shopping-kids-clothes', "Kids' clothes"],
+    ] as const
+    for (const [id, title] of shopping) {
+      const duplicate = existing.some(item => item.category.toLowerCase() === 'shopping' && item.title.trim().toLowerCase() === title.toLowerCase())
+      if (!duplicate && !await db.checklist.get(id)) {
+        await db.checklist.add({ id, title, category:'Shopping', completed:false, createdAt, updatedAt:createdAt })
+      }
+    }
+    await db.metadata.put({ key:'shoppingSeedsV1', value:'complete' })
+  })
+}
+
+async function ensureDatedItinerarySeeds() {
+  await db.transaction('rw', [db.days, db.items, db.places, db.activityTemplates, db.metadata], async () => {
+    if ((await db.metadata.get('datedItinerarySeedsV1'))?.value === 'complete') return
+    const templates = await db.activityTemplates.toArray()
+    const peninsula = templates.find(template => template.name === 'Cape Peninsula Tour')
+    const peninsulaChildren = (peninsula?.stops ?? []).map(stop => {
+      const duration = stop.approximateMinutes
+        ? `Approx. ${stop.approximateMinutes >= 60 && stop.approximateMinutes % 60 === 0 ? `${stop.approximateMinutes / 60} hour` : `${stop.approximateMinutes} min`}`
+        : ''
+      return { name:stop.placeName, notes:[stop.optional ? 'Optional' : '', ...stop.notes, duration].filter(Boolean).join(' · ') }
+    })
+    const plans: Array<{ key:string; dayId:string; name:string; children:Array<{ name:string; notes?:string }> }> = [
+      { key:'arrival-waterfront', dayId:'2026-09-21', name:'Arrival & V&A Waterfront', children:[
+        {name:'Arrive in Cape Town (CPT)'}, {name:'Check in',notes:'Hyatt Regency or StayEasy · accommodation not selected'}, {name:'Explore V&A Waterfront'}, {name:'Light shopping'}, {name:'Dinner at the Waterfront'},
+      ]},
+      { key:'red-bus-mountain', dayId:'2026-09-22', name:'Red Bus & Table Mountain', children:[
+        {name:'Cape Town Red Bus / Hop-On Hop-Off'}, {name:'Table Mountain'}, {name:'City sights',notes:"Bo-Kaap · Company's Garden"}, {name:'Camps Bay & Clifton'}, {name:'Sunset dinner'},
+      ]},
+      { key:'flexible-day', dayId:'2026-09-23', name:'Flexible Day', children:[
+        {name:'Kirstenbosch + wine tasting',notes:'Option 1 · Constantia'}, {name:'Relaxed day',notes:'Option 2 · Cafés · beach · spa · museum · city exploring'},
+      ]},
+      { key:'move-sea-point', dayId:'2026-09-24', name:'Move to Sea Point', children:[
+        {name:'Check out and transfer to Sea Point',notes:'Airbnb details not set'}, {name:'Settle in'}, {name:'Sea Point Promenade'}, {name:'Cafés and local dining'},
+      ]},
+      { key:'cape-peninsula', dayId:'2026-09-25', name:'Cape Peninsula Tour', children:peninsulaChildren },
+      { key:'golf-wine', dayId:'2026-09-26', name:'Golf & Wine Tour', children:[
+        {name:'Morning golf',notes:'9 or 18 holes · course not selected'}, {name:'Wine tasting',notes:'Stellenbosch or Franschhoek'}, {name:'Long lunch'}, {name:'Return to Cape Town'},
+      ]},
+      { key:'shopping-cruise', dayId:'2026-09-27', name:'Shopping & Sunset Cruise', children:[
+        {name:'Shopping in Sea Point',notes:'The Point Mall · Piazza St John'}, {name:'V&A Waterfront final shopping'}, {name:'Sunset cruise'}, {name:'Farewell dinner'},
+      ]},
+      { key:'departure', dayId:'2026-09-28', name:'Departure', children:[
+        {name:'Breakfast'}, {name:'Check out'}, {name:'Transfer to Cape Town International Airport'},
+      ]},
+    ]
+    const createdAt = now()
+    const placeFor = async (key:string, name:string, notes?:string) => {
+      const existing = await db.places.filter(place => place.name.trim().toLowerCase() === name.trim().toLowerCase()).first()
+      if (existing) return existing
+      const place: Place = { id:`dated-place-${key}`, name, notes, wantToVisit:false, seeded:false, createdAt, updatedAt:createdAt }
+      await db.places.add(place)
+      return place
+    }
+    for (const [planIndex, plan] of plans.entries()) {
+      if (!await db.days.get(plan.dayId)) continue
+      let alreadyScheduled = false
+      for (const item of await db.items.where('dayId').equals(plan.dayId).toArray()) {
+        if ((await db.places.get(item.placeId))?.name.trim().toLowerCase() === plan.name.toLowerCase()) {
+          alreadyScheduled = true
+          break
+        }
+      }
+      if (alreadyScheduled || await db.items.get(`dated-item-${plan.key}`)) continue
+      const parentPlace = await placeFor(plan.key, plan.name)
+      const parent: ItineraryItem = { id:`dated-item-${plan.key}`, dayId:plan.dayId, placeId:parentPlace.id, isActivityGroup:true, visited:false, position:planIndex, createdAt, updatedAt:createdAt }
+      await db.items.add(parent)
+      for (const [childIndex, child] of plan.children.entries()) {
+        const childPlace = await placeFor(`${plan.key}-${childIndex}`,child.name,child.notes)
+        await db.items.add({ id:`dated-item-${plan.key}-${childIndex}`, dayId:plan.dayId, placeId:childPlace.id, parentId:parent.id, notes:child.notes, visited:false, position:childIndex, createdAt, updatedAt:createdAt })
+      }
+    }
+    await db.metadata.put({ key:'datedItinerarySeedsV1', value:'complete' })
+  })
+}
+
 export async function initializeDatabase() {
   await db.transaction('rw', [db.trips, db.checklist, db.days, db.rateSets, db.metadata], async () => {
     if (await db.trips.get('current')) return
@@ -115,6 +200,8 @@ export async function initializeDatabase() {
     await db.metadata.bulkAdd([{ key: 'schemaVersion', value: '4' }, { key: 'displayCurrency', value: 'KES' }])
   })
   await ensurePlanningSeeds()
+  await ensureShoppingSeeds()
+  await ensureDatedItinerarySeeds()
   await db.metadata.put({ key: 'schemaVersion', value: '4' })
 }
 
@@ -147,7 +234,13 @@ export interface LinkedCostInput {
 
 export type ItineraryDetailsPatch = Partial<Pick<ItineraryItem, 'dayId' | 'parentId' | 'time' | 'notes' | 'bookingStatus' | 'visited' | 'position'>> & {
   name?: string
+  address?: string
+  googleMapsUrl?: string
 }
+
+type PlaceDetailsPatch = Partial<Pick<Place, 'name' | 'address' | 'googleMapsUrl' | 'notes'>>
+type ScheduledItemPatch = Partial<Pick<ItineraryItem, 'parentId' | 'time' | 'bookingStatus' | 'notes'>>
+type MaterializeDetails = PlaceDetailsPatch & ScheduledItemPatch
 
 const currencies: readonly Currency[] = ['KES', 'USD', 'ZAR']
 
@@ -204,15 +297,17 @@ export async function createItineraryPlace(place: Place, item: ItineraryItem, co
   return item
 }
 
-export async function scheduleCandidatePlace(placeId: string, dayId: string, cost?: LinkedCostInput): Promise<ItineraryItem> {
+export async function scheduleCandidatePlace(placeId: string, dayId: string, cost?: LinkedCostInput, placePatch?: PlaceDetailsPatch, itemPatch?: ScheduledItemPatch): Promise<ItineraryItem> {
   const createdAt = now()
-  const item: ItineraryItem = { id: makeId(), dayId, placeId, visited: false, position: Date.now(), createdAt, updatedAt: createdAt }
+  const item: ItineraryItem = { id: makeId(), dayId, placeId, ...itemPatch, visited: false, position: Date.now(), createdAt, updatedAt: createdAt }
   await db.transaction('rw', [db.places, db.items, db.expenses, db.days, db.rateSets], async () => {
     const place = await db.places.get(placeId)
     if (!place) throw new Error('The place does not exist.')
     if (!await db.days.get(dayId)) throw new Error('The itinerary day does not exist.')
+    if (item.parentId) await validateParentAssignment(item.id, dayId, item.parentId)
     await db.items.add(item)
-    await db.places.update(placeId, { wantToVisit: false, updatedAt: createdAt })
+    if (item.parentId) await db.items.update(item.parentId, { isActivityGroup: true, updatedAt: createdAt })
+    await db.places.update(placeId, { ...placePatch, wantToVisit: false, updatedAt: createdAt })
     if (cost !== undefined) await addLinkedExpense(item, cost, createdAt)
   })
   return item
@@ -222,7 +317,9 @@ export async function saveItineraryDetails(itemId: string, patch: ItineraryDetai
   await db.transaction('rw', [db.items, db.places, db.expenses, db.days, db.rateSets], async () => {
     const item = await db.items.get(itemId)
     if (!item) throw new Error('The itinerary item does not exist.')
-    const { name, ...itemPatch } = patch
+    const changesAddress = Object.prototype.hasOwnProperty.call(patch, 'address')
+    const changesMapUrl = Object.prototype.hasOwnProperty.call(patch, 'googleMapsUrl')
+    const { name, address, googleMapsUrl, ...itemPatch } = patch
     const changesParent = Object.prototype.hasOwnProperty.call(itemPatch, 'parentId')
     const nextParentId = changesParent ? itemPatch.parentId : item.parentId
     const nextDayId = itemPatch.dayId ?? item.dayId
@@ -233,19 +330,24 @@ export async function saveItineraryDetails(itemId: string, patch: ItineraryDetai
         throw new Error('An itinerary group with children cannot become a child item.')
       }
     }
-    if (itemPatch.dayId !== undefined && itemPatch.dayId !== item.dayId && !nextParentId) {
-      const children = await db.items.where('parentId').equals(itemId).count()
-      if (children > 0) throw new Error('Detach or move child itinerary items before changing the parent day.')
-    }
     const updatedAt = now()
-    if (name !== undefined) {
-      const normalizedName = name.trim()
-      if (!normalizedName) throw new Error('Place name is required.')
-      if (await db.places.update(item.placeId, { name: normalizedName, updatedAt }) !== 1) {
+    if (name !== undefined || changesAddress || changesMapUrl) {
+      const placePatch: PlaceDetailsPatch & { updatedAt: string } = { updatedAt }
+      if (name !== undefined) {
+        const normalizedName = name.trim()
+        if (!normalizedName) throw new Error('Place name is required.')
+        placePatch.name = normalizedName
+      }
+      if (changesAddress) placePatch.address = address
+      if (changesMapUrl) placePatch.googleMapsUrl = googleMapsUrl
+      if (await db.places.update(item.placeId, placePatch) !== 1) {
         throw new Error('The linked place does not exist.')
       }
     }
     await db.items.update(itemId, { ...itemPatch, updatedAt })
+    if (itemPatch.dayId !== undefined && itemPatch.dayId !== item.dayId && !nextParentId) {
+      await db.items.where('parentId').equals(itemId).modify({ dayId: itemPatch.dayId, updatedAt })
+    }
     if (changesParent) await updateParentGroupFlags(item.parentId, nextParentId, updatedAt)
     if (linkedCost === undefined) return
     const existing = await db.expenses.where('itineraryItemId').equals(itemId).first()
@@ -276,7 +378,7 @@ export async function deleteItineraryItem(id: string) {
   })
 }
 
-export async function materializeTemplate(template: ActivityTemplate, dayId: string, cost?: LinkedCostInput): Promise<ItineraryItem> {
+export async function materializeTemplate(template: ActivityTemplate, dayId: string, cost?: LinkedCostInput, details?: MaterializeDetails): Promise<ItineraryItem> {
   let createdItem!: ItineraryItem
   await db.transaction('rw', [db.places, db.items, db.expenses, db.days, db.rateSets], async () => {
     const createdAt = now()
@@ -289,18 +391,35 @@ export async function materializeTemplate(template: ActivityTemplate, dayId: str
         place = { id: makeId(), name: stop.placeName, notes: template.description, wantToVisit: false, seeded: true, createdAt, updatedAt: createdAt }
         await db.places.add(place)
       }
-      createdItem = { id: makeId(), dayId, placeId: place.id, templateId: template.id, notes: stop.notes.join(' · ') || undefined, visited: false, position: Date.now(), createdAt, updatedAt: createdAt }
+      if (details) {
+        place = {
+          ...place,
+          id: makeId(),
+          name: details.name ?? place.name,
+          address: details.address,
+          googleMapsUrl: details.googleMapsUrl,
+          wantToVisit: false,
+          seeded: false,
+          createdAt,
+          updatedAt: createdAt,
+        }
+        await db.places.add(place)
+      }
+      createdItem = { id: makeId(), dayId, placeId: place.id, templateId: template.id, parentId: details?.parentId, time: details?.time, bookingStatus: details?.bookingStatus, notes: details?.notes ?? (stop.notes.join(' · ') || undefined), visited: false, position: Date.now(), createdAt, updatedAt: createdAt }
+      if (createdItem.parentId) await validateParentAssignment(createdItem.id, dayId, createdItem.parentId)
       await db.items.add(createdItem)
+      if (createdItem.parentId) await db.items.update(createdItem.parentId, { isActivityGroup: true, updatedAt: createdAt })
       if (cost !== undefined) await addLinkedExpense(createdItem, cost, createdAt)
       return
     }
 
     const groupPlace: Place = {
-      id: makeId(), name: template.name, notes: template.description, wantToVisit: false,
+      id: makeId(), name: details?.name ?? template.name, address: details?.address, googleMapsUrl: details?.googleMapsUrl, notes: details?.notes ?? template.description, wantToVisit: false,
       seeded: false, createdAt, updatedAt: createdAt,
     }
     const parent: ItineraryItem = {
       id: makeId(), dayId, placeId: groupPlace.id, templateId: template.id, isActivityGroup: true,
+      time: details?.time, bookingStatus: details?.bookingStatus, notes: details?.notes,
       visited: false, position: Date.now(), createdAt, updatedAt: createdAt,
     }
     await db.places.add(groupPlace)
@@ -346,7 +465,9 @@ export async function deleteItineraryGroup(parentId: string) {
     }
     await db.expenses.where('itineraryItemId').anyOf(removedIds).modify(expense => { delete expense.itineraryItemId })
     await db.items.bulkDelete(removedIds)
-    if (parent) await db.places.delete(parent.placeId)
+    if (parent && await db.items.where('placeId').equals(parent.placeId).count() === 0) {
+      await db.places.delete(parent.placeId)
+    }
   })
 }
 

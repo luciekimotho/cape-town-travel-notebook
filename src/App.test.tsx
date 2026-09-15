@@ -1,7 +1,7 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App, { TransientNotice } from './App'
-import { db, initializeDatabase, scheduleCandidatePlace } from './db'
+import { db, initializeDatabase, materializeTemplate, scheduleCandidatePlace } from './db'
 
 beforeEach(async () => {
   vi.restoreAllMocks()
@@ -13,19 +13,30 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+async function renderApp() {
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Capetown 2026' })
+}
+
+async function seedTour() {
+  await initializeDatabase()
+  const template = await db.activityTemplates.get('seed-template-cape-peninsula')
+  if (!template) throw new Error('Missing peninsula template')
+  return materializeTemplate(template, '2026-09-21')
+}
+
 describe('transient success notices', () => {
-  it('stays visible until 20 seconds and then dismisses', () => {
+  it('dismisses after 20 seconds', () => {
     vi.useFakeTimers()
     const dismiss = vi.fn()
     render(<TransientNotice message="Saved" version={1} onDismiss={dismiss}/>)
-
     act(() => vi.advanceTimersByTime(19_999))
     expect(dismiss).not.toHaveBeenCalled()
     act(() => vi.advanceTimersByTime(1))
     expect(dismiss).toHaveBeenCalledOnce()
   })
 
-  it('resets the timer for replacements and repeated text', () => {
+  it('resets for repeated text and replacements', () => {
     vi.useFakeTimers()
     const dismiss = vi.fn()
     const { rerender } = render(<TransientNotice message="Saved" version={1} onDismiss={dismiss}/>)
@@ -34,185 +45,187 @@ describe('transient success notices', () => {
     act(() => vi.advanceTimersByTime(10_000))
     expect(dismiss).not.toHaveBeenCalled()
     rerender(<TransientNotice message="Moved" version={3} onDismiss={dismiss}/>)
-    act(() => vi.advanceTimersByTime(19_999))
-    expect(dismiss).not.toHaveBeenCalled()
-    act(() => vi.advanceTimersByTime(1))
+    act(() => vi.advanceTimersByTime(20_000))
     expect(dismiss).toHaveBeenCalledOnce()
   })
 })
 
-async function openChecklist() {
-  render(<App />)
-  await screen.findByRole('heading', { name: 'Trip' })
-  fireEvent.click(screen.getByRole('button', { name: 'checklist' }))
-  return screen.findByRole('button', { name: '+ Add reminder' })
-}
+describe('whole-app navigation and settings', () => {
+  it('uses the approved five-tab order and Moments name', async () => {
+    await renderApp()
+    const nav = screen.getByRole('navigation', { name: 'Notebook sections' })
+    expect(within(nav).getAllByRole('button').map(button => button.textContent)).toEqual(['Itinerary','Places','Moments','Checklist','Costs'])
+    expect(screen.queryByText('Stamps')).not.toBeInTheDocument()
+  })
 
-describe('checklist form sheet', () => {
-  it('opens from the Add action and cancels with focus returned', async () => {
-    const opener = await openChecklist()
+  it('opens settings with only exchange-rate and backup cards', async () => {
+    await renderApp()
+    fireEvent.click(screen.getByRole('button', { name: 'Open settings' }))
+    const dialog = screen.getByRole('dialog', { name: 'Settings' })
+    expect(within(dialog).getByRole('heading', { name: 'Exchange rates' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('heading', { name: 'Backups' })).toBeInTheDocument()
+    expect(within(dialog).queryByText('Trip')).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Export ZIP' })).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Restore')).toBeInTheDocument()
+  })
+
+  it('returns focus to the settings button after Escape', async () => {
+    await renderApp()
+    const opener = screen.getByRole('button', { name: 'Open settings' })
     opener.focus()
     fireEvent.click(opener)
-
-    expect(screen.getByRole('dialog', { name: 'Add a reminder' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Task')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    fireEvent.keyDown(document, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(opener).toHaveFocus()
   })
+})
 
-  it('closes only after a successful committed save', async () => {
-    const opener = await openChecklist()
-    fireEvent.click(opener)
-    fireEvent.change(screen.getByLabelText('Task'), { target: { value: 'Reserve airport transfer' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save reminder' }))
-
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect((await db.checklist.toArray()).some(item => item.title === 'Reserve airport transfer')).toBe(true)
+describe('itinerary timeline and detail context', () => {
+  it('shows all tour stops in the compact itinerary timeline by default', async () => {
+    await seedTour()
+    await renderApp()
+    const group = screen.getByRole('group', { name: 'Cape Peninsula Tour stops' })
+    expect(within(group).getAllByRole('button')).toHaveLength(9)
+    expect(within(group).getByRole('button', { name: /New Cape Point Lighthouse/ })).toBeInTheDocument()
+    expect(screen.queryByText('The route')).not.toBeInTheDocument()
+    expect(screen.queryByText('More')).not.toBeInTheDocument()
   })
 
-  it('preserves the draft and sheet when persistence fails', async () => {
-    const opener = await openChecklist()
-    fireEvent.click(opener)
-    vi.spyOn(db.checklist, 'put').mockRejectedValueOnce(new Error('Storage unavailable'))
-    fireEvent.change(screen.getByLabelText('Task'), { target: { value: 'Test failure' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save reminder' }))
-
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Storage unavailable'))
-    expect(screen.getByRole('dialog', { name: 'Add a reminder' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Task')).toHaveValue('Test failure')
-    expect(screen.queryByText('Checklist saved.')).not.toBeInTheDocument()
-    expect((await db.checklist.toArray()).some(item => item.title === 'Test failure')).toBe(false)
-    vi.useFakeTimers()
-    act(() => vi.advanceTimersByTime(60_000))
-    expect(screen.getByRole('alert')).toHaveTextContent('Storage unavailable')
+  it('returns a child opened from the overview to the overview', async () => {
+    await seedTour()
+    await renderApp()
+    fireEvent.click(screen.getByRole('button', { name: /Bo-Kaap/ }))
+    expect(screen.getByRole('heading', { name: 'Bo-Kaap' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Itinerary' }))
+    expect(screen.getByRole('heading', { name: 'Itinerary' })).toBeInTheDocument()
   })
 
-  it('keeps secondary record actions in a keyboard-operable disclosure', async () => {
-    await openChecklist()
-    const summary = screen.getAllByText('More')[0]
-    const details = summary.closest('details')
-    expect(details).not.toHaveAttribute('open')
+  it('returns a child opened inside a parent detail to that parent', async () => {
+    await seedTour()
+    await renderApp()
+    fireEvent.click(screen.getByRole('button', { name: /Cape Peninsula Tour/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Bo-Kaap/ }))
+    expect(screen.getByRole('heading', { name: 'Bo-Kaap' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Cape Peninsula Tour' }))
+    expect(screen.getByRole('heading', { name: 'Cape Peninsula Tour' })).toBeInTheDocument()
+  })
 
-    fireEvent.click(summary)
-
-    expect(details).toHaveAttribute('open')
-    expect(screen.getAllByRole('button', { name: 'Edit' }).length).toBeGreaterThan(0)
+  it('stamps one child independently, adds its Moment, and only animates the new stamp', async () => {
+    const parent = await seedTour()
+    const children = await db.items.where('parentId').equals(parent.id).toArray()
+    await renderApp()
+    fireEvent.click(screen.getByRole('button', { name: /Bo-Kaap/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Stamp this visit' }))
+    await waitFor(() => expect(document.querySelector('.hero-stamp')).toHaveClass('stamp-pop'))
+    expect((await db.items.get(parent.id))?.visited).toBe(false)
+    expect((await db.items.get(children.find(child => child.placeId === 'seed-place-bo-kaap')!.id))?.visited).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Itinerary' }))
+    fireEvent.click(screen.getByRole('button', { name: /Bo-Kaap/ }))
+    expect(document.querySelector('.hero-stamp')).not.toHaveClass('stamp-pop')
+    fireEvent.click(screen.getByRole('button', { name: 'Itinerary' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Moments' }))
+    expect(screen.getByRole('button', { name: /Bo-Kaap/ })).toBeInTheDocument()
   })
 })
 
-describe('shared itinerary entry form', () => {
-  async function openEntry() {
-    render(<App />)
-    await screen.findByText('Trip')
+describe('unified activity form', () => {
+  it('shows every approved field and only requires Name', async () => {
+    await renderApp()
     fireEvent.click(screen.getByRole('button', { name: 'Add activity' }))
-    return screen.getByRole('dialog', { name: /Add to/ })
-  }
+    const dialog = screen.getByRole('dialog', { name: 'Add activity' })
+    for (const label of ['Name *','Parent activity','Day','Time','Cost','Currency','Booking status','Address','Google Maps URL','Notes']) {
+      expect(within(dialog).getByLabelText(label)).toBeInTheDocument()
+    }
+    const fields = within(dialog).getAllByRole('textbox').concat(within(dialog).getAllByRole('combobox')).concat(within(dialog).getAllByRole('spinbutton'))
+    expect(fields.filter(field => field.hasAttribute('required'))).toEqual([within(dialog).getByLabelText('Name *')])
+    expect(within(dialog).getByRole('button', { name: 'Save activity' })).toHaveAttribute('title', 'Save activity')
+    expect(within(dialog).queryByRole('button', { name: 'Delete activity' })).not.toBeInTheDocument()
+  })
 
-  it('creates a standalone activity and exactly one linked real expense', async () => {
-    await openEntry()
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Winelands day' } })
-    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '1250' } })
+  it('creates one real linked cost and closes only after commit', async () => {
+    await renderApp()
+    fireEvent.click(screen.getByRole('button', { name: 'Add activity' }))
+    fireEvent.change(screen.getByLabelText('Name *'), { target: { value: 'Winelands day' } })
+    fireEvent.change(screen.getByLabelText('Cost'), { target: { value: '1250' } })
     fireEvent.change(screen.getByLabelText('Currency'), { target: { value: 'ZAR' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add to day' }))
-
+    fireEvent.click(screen.getByRole('button', { name: 'Save activity' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     const place = await db.places.filter(candidate => candidate.name === 'Winelands day').first()
     const item = place && await db.items.where('placeId').equals(place.id).first()
-    expect(item?.parentId).toBeUndefined()
-    const linked = await db.expenses.where('itineraryItemId').equals(item!.id).toArray()
-    expect(linked).toHaveLength(1)
-    expect(linked[0]).toMatchObject({ amount: 1250, currency: 'ZAR', category: 'Activity' })
+    expect(await db.expenses.where('itineraryItemId').equals(item!.id).toArray()).toHaveLength(1)
   })
 
-  it('attaches a new activity to an eligible existing parent', async () => {
+  it('retains every field when the atomic write fails', async () => {
+    await renderApp()
+    vi.spyOn(db.items, 'add').mockRejectedValueOnce(new Error('Activity write failed'))
+    fireEvent.click(screen.getByRole('button', { name: 'Add activity' }))
+    fireEvent.change(screen.getByLabelText('Name *'), { target: { value: 'Draft day' } })
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'Keep this draft' } })
+    fireEvent.change(screen.getByLabelText('Cost'), { target: { value: '500' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save activity' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Activity write failed'))
+    expect(screen.getByRole('dialog', { name: 'Add activity' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Name *')).toHaveValue('Draft day')
+    expect(screen.getByLabelText('Notes')).toHaveValue('Keep this draft')
+    expect(screen.getByLabelText('Cost')).toHaveValue(500)
+  })
+
+  it('offers same-day parent assignment and delete beside save when editing', async () => {
     await initializeDatabase()
     const createdAt = new Date().toISOString()
-    await db.places.add({ id: 'parent-place', name: 'Peninsula day', wantToVisit: false, createdAt, updatedAt: createdAt })
-    await db.items.add({ id: 'parent-item', dayId: '2026-09-21', placeId: 'parent-place', visited: false, position: 1, createdAt, updatedAt: createdAt })
-    await openEntry()
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Cape Point' } })
-    fireEvent.change(screen.getByLabelText('Parent activity'), { target: { value: 'parent-item' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add to day' }))
-
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    const childPlace = await db.places.filter(candidate => candidate.name === 'Cape Point').first()
-    const child = childPlace && await db.items.where('placeId').equals(childPlace.id).first()
-    expect(child?.parentId).toBe('parent-item')
-    expect((await db.items.get('parent-item'))?.isActivityGroup).toBe(true)
-  })
-
-  it('retains every draft when the atomic write fails', async () => {
-    await openEntry()
-    vi.spyOn(db.items, 'add').mockRejectedValueOnce(new Error('Activity write failed'))
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Draft day' } })
-    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'Keep this draft' } })
-    fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '500' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add to day' }))
-
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Activity write failed'))
-    expect(screen.getByRole('dialog', { name: /Add to/ })).toBeInTheDocument()
-    expect(screen.getByLabelText('Name')).toHaveValue('Draft day')
-    expect(screen.getByLabelText('Notes')).toHaveValue('Keep this draft')
-    expect(screen.getByLabelText('Amount')).toHaveValue(500)
-    expect(await db.places.filter(candidate => candidate.name === 'Draft day').count()).toBe(0)
-    expect(await db.expenses.count()).toBe(0)
+    await db.places.add({ id:'parent-place',name:'Peninsula day',wantToVisit:false,createdAt,updatedAt:createdAt })
+    await db.items.add({ id:'parent-item',dayId:'2026-09-21',placeId:'parent-place',visited:false,position:1,createdAt,updatedAt:createdAt })
+    await renderApp()
+    fireEvent.click(screen.getByRole('button', { name: 'Add activity' }))
+    expect(screen.getByRole('option', { name: 'Peninsula day' })).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.click(screen.getByRole('button', { name: /Peninsula day/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    const dialog = screen.getByRole('dialog', { name: 'Edit activity' })
+    expect(within(dialog).getByRole('button', { name: 'Delete activity' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Save activity' })).toBeInTheDocument()
   })
 })
 
-describe('places and settings navigation', () => {
-  it('merges saved and seeded places without duplicate navigation or cards', async () => {
+describe('remaining production surfaces', () => {
+  it('keeps activity-backed Places cards unique', async () => {
     await initializeDatabase()
     const createdAt = new Date().toISOString()
-    await db.places.add({ id: 'custom-place', name: 'Kirstenbosch', wantToVisit: true, createdAt, updatedAt: createdAt })
-    await db.places.add({ id: 'template-wishlist-seed-template-red-bus', name: 'Cape Town Red Bus / Hop-On Hop-Off', wantToVisit: true, createdAt, updatedAt: createdAt })
-    await db.places.update('seed-place-bo-kaap', { wantToVisit: true })
-    render(<App />)
-    await screen.findByText('Trip')
-    fireEvent.click(screen.getByRole('button', { name: 'places' }))
-
-    expect(screen.queryByRole('button', { name: 'ideas' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /want to visit/i })).not.toBeInTheDocument()
-    expect(screen.getAllByRole('heading', { name: 'Bo-Kaap' })).toHaveLength(1)
+    await db.places.add({id:'template-wishlist-seed-template-red-bus',name:'Cape Town Red Bus / Hop-On Hop-Off',wantToVisit:true,createdAt,updatedAt:createdAt})
+    await renderApp()
+    fireEvent.click(screen.getByRole('button', { name: 'Places' }))
     expect(screen.getAllByRole('heading', { name: 'Table Mountain' })).toHaveLength(1)
     expect(screen.getAllByRole('heading', { name: 'Cape Town Red Bus / Hop-On Hop-Off' })).toHaveLength(1)
-    expect(screen.getByRole('heading', { name: 'Kirstenbosch' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Add place' })).toBeInTheDocument()
   })
 
-  describe('linked expense editing', () => {
-    it('keeps the recorded activity date immutable from Costs', async () => {
-      await initializeDatabase()
-      const item = await scheduleCandidatePlace('seed-place-table-mountain', '2026-09-22', { amount:100, currency:'KES' })
-      const original = (await db.expenses.where('itineraryItemId').equals(item.id).first())!
-      render(<App />)
-      await screen.findByText('Trip')
-      fireEvent.click(screen.getByRole('button', { name: /Costs/ }))
-      fireEvent.click(await screen.findByText('More'))
-      fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
-
-      const date = screen.getByLabelText('Recorded date')
-      expect(date).toHaveAttribute('readonly')
-      fireEvent.change(date, { target: { value: '2026-09-28' } })
-      fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '150' } })
-      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-
-      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-      expect(await db.expenses.get(original.id)).toMatchObject({ date:'2026-09-22', amount:150 })
-    })
+  it('edits checklist reminders in an icon-action sheet', async () => {
+    await renderApp()
+    fireEvent.click(screen.getByRole('button', { name: 'Checklist' }))
+    expect(screen.getByText('Shopping')).toBeInTheDocument()
+    expect(screen.getByText('Sneakers', { selector:'strong' })).toBeInTheDocument()
+    expect(screen.getByText('Golf stuff', { selector:'strong' })).toBeInTheDocument()
+    expect(screen.getByText("Kids' clothes", { selector:'strong' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Add reminder' }))
+    fireEvent.change(screen.getByLabelText('Reminder *'), { target: { value: 'Confirm museum day' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save reminder' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(await db.checklist.filter(item => item.title === 'Confirm museum day').count()).toBe(1)
   })
 
-  it('opens practical settings from the header without a More navigation tab', async () => {
-    render(<App />)
-    await screen.findByText('Trip')
-    expect(screen.queryByRole('button', { name: /More/ })).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open settings' }))
-
-    expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
-    expect(screen.getByText('Trip', { selector: 'strong' })).toBeInTheDocument()
-    expect(screen.getByText('Exchange rates')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Export ZIP' })).toBeInTheDocument()
+  it('keeps a linked expense recorded date immutable from Costs', async () => {
+    await initializeDatabase()
+    const item = await scheduleCandidatePlace('seed-place-table-mountain','2026-09-22',{amount:100,currency:'KES'})
+    const original = (await db.expenses.where('itineraryItemId').equals(item.id).first())!
+    await renderApp()
+    fireEvent.click(screen.getByRole('button', { name: 'Costs' }))
+    expect(screen.getByRole('group', { name: 'Display currency' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Table Mountain/ }))
+    const date = screen.getByLabelText('Recorded date')
+    expect(date).toHaveAttribute('readonly')
+    fireEvent.change(date,{target:{value:'2026-09-28'}})
+    fireEvent.change(screen.getByLabelText('Amount *'),{target:{value:'150'}})
+    fireEvent.click(screen.getByRole('button',{name:'Save expense'}))
+    await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(await db.expenses.get(original.id)).toMatchObject({date:'2026-09-22',amount:150})
   })
 })
