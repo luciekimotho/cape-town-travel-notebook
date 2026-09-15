@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { createBackup, parseBackup, restoreBackup } from './backup'
-import { db, deleteItineraryItem, initializeDatabase, loadData, makeId, saveTrip } from './db'
+import { db, deleteItineraryGroup, deleteItineraryItem, initializeDatabase, loadData, makeId, materializeTemplate, moveItineraryGroup, saveTrip } from './db'
 import { compressPhoto } from './photo'
 import type { ActivityTemplate, AppData, BookingStatus, ChecklistItem, Currency, Expense, ItineraryItem, Place, RateSet, Trip } from './types'
 import './App.css'
@@ -17,16 +17,11 @@ export default function App() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
-  const [offlineReady, setOfflineReady] = useState(false)
   const [restoreCandidate, setRestoreCandidate] = useState<AppData>()
   const refresh = async () => setData(await loadData())
 
   useEffect(() => {
     initializeDatabase().then(refresh).catch(err => setError(String(err)))
-    const ready = () => setOfflineReady(true)
-    window.addEventListener('offline-ready', ready)
-    if ('serviceWorker' in navigator) navigator.serviceWorker.ready.then(ready)
-    return () => window.removeEventListener('offline-ready', ready)
   }, [])
 
   const commit = async (operation: () => Promise<unknown>, success?: string) => {
@@ -44,7 +39,7 @@ export default function App() {
 
   if (!data) return <main className="loading"><span className="stamp-mark">CT</span><p>Opening your notebook…</p>{error && <p role="alert">{error}</p>}</main>
   return <div className="app-shell">
-    <header><div><p className="eyebrow">Field notes · 2026</p><h1>{data.trip.destination}</h1><p>{data.trip.startDate} → {data.trip.endDate} · {data.trip.travellers} adults</p></div><div className={`offline-pill ${offlineReady ? 'ready' : ''}`}><i />{offlineReady ? 'Offline ready' : 'Preparing offline'}</div></header>
+    <header><div><p className="eyebrow">Field notes · 2026</p><h1>{data.trip.destination}</h1><p>{data.trip.startDate} → {data.trip.endDate} · {data.trip.travellers} adults</p></div></header>
     {(error || notice) && <div className={error ? 'message error' : 'message'} role={error ? 'alert' : 'status'}>{error || notice}<button onClick={() => { setError(''); setNotice('') }} aria-label="Dismiss">×</button></div>}
     <main>
       {tab === 'plan' && <Plan data={data} commit={commit} busy={busy} />}
@@ -96,7 +91,8 @@ function PlaceForm({ onSave, dayId }: { onSave: (place: Place, item?: ItineraryI
 function Itinerary({ data, commit, busy }: SectionProps) {
   const [openDay, setOpenDay] = useState(data.days.find(d => !d.outOfRange)?.id ?? data.days[0]?.id)
   const day = data.days.find(d => d.id === openDay)
-  const items = data.items.filter(i => i.dayId === openDay).sort((a,b) => a.position-b.position)
+  const dayItems = data.items.filter(i => i.dayId === openDay)
+  const items = dayItems.filter(item => !item.parentId).sort((a,b) => a.position-b.position)
   const savePlace = (place: Place, item?: ItineraryItem) => commit(() => db.transaction('rw', [db.places,db.items], async () => { await db.places.put(place); if (item) await db.items.put(item) }), 'Itinerary saved.')
   const move = (item: ItineraryItem, direction: -1|1) => {
     const index = items.findIndex(i => i.id === item.id); const swap = items[index + direction]; if (!swap) return
@@ -112,7 +108,23 @@ function Itinerary({ data, commit, busy }: SectionProps) {
     else { await db.stamps.add({id:makeId(),itineraryItemId:item.id,placeName:place.name,visitDate:day!.date,detached:false,createdAt:timestamp()}); await db.items.update(item.id,{visited:true,updatedAt:timestamp()}) }
   }), item.visited ? 'Visit undone.' : 'Stamp added.')
   return <div className="stack"><div className="date-strip">{data.days.map(d => <button key={d.id} className={`${openDay === d.id ? 'active' : ''} ${d.outOfRange ? 'flagged' : ''}`} onClick={() => setOpenDay(d.id)}><small>{formatDate(d.date).split(' ')[0]}</small><strong>{d.date.slice(-2)}</strong>{d.outOfRange && <span>!</span>}</button>)}</div>{day?.outOfRange && <p className="warning">This existing day falls outside the current trip dates. Move or remove its items when ready.</p>}
-    {items.map((item,index) => { const place = data.places.find(p => p.id === item.placeId)!; return <article className="card itinerary-item" key={item.id}><div className="time">{item.time || 'Any time'}</div><div className="itinerary-body"><div className="row"><h3>{place?.name}</h3>{item.bookingStatus && <span className="tag">{item.bookingStatus}</span>}</div>{place?.address && <p>{place.address}</p>}{item.notes && <p>{item.notes}</p>}<div className="item-actions"><input aria-label={`Time for ${place.name}`} type="time" value={item.time ?? ''} onChange={e => commit(() => db.items.update(item.id,{time:e.target.value||undefined,updatedAt:timestamp()}))}/><select aria-label={`Booking status for ${place.name}`} value={item.bookingStatus ?? ''} onChange={e => commit(() => db.items.update(item.id,{bookingStatus:(e.target.value||undefined) as BookingStatus|undefined,updatedAt:timestamp()}))}><option value="">Status not set</option>{['Idea','To book','Booked','Confirmed','Cancelled'].map(x=><option key={x}>{x}</option>)}</select><button disabled={index===0||busy} onClick={() => move(item,-1)}>↑ Earlier</button><button disabled={index===items.length-1||busy} onClick={() => move(item,1)}>↓ Later</button><select aria-label="Move to day" value={item.dayId} onChange={e => commit(() => db.items.update(item.id,{dayId:e.target.value,updatedAt:timestamp()}))}>{data.days.map(d => <option key={d.id} value={d.id}>{d.date}</option>)}</select>{place?.googleMapsUrl && <a href={place.googleMapsUrl} target="_blank" rel="noreferrer">Google Maps ↗</a>}<button className={item.visited ? 'visited' : ''} onClick={() => visited(item,place)}>{item.visited ? 'Undo visited' : 'Mark visited'}</button><button onClick={() => confirm('Delete this itinerary item? Its stamp becomes a detached memory.') && commit(() => deleteItineraryItem(item.id))}>Delete</button></div></div></article>})}
+    {items.map((item,index) => {
+      const place = data.places.find(candidate => candidate.id === item.placeId)!
+      if (item.isActivityGroup) {
+        const children = dayItems.filter(child => child.parentId === item.id).sort((a,b) => a.position-b.position)
+        const visitedCount = children.filter(child => child.visited).length
+        return <article className="card itinerary-group" key={item.id}>
+          <div className="group-heading"><div><p className="eyebrow">Activity route</p><h3>{place.name}</h3><p>{children.length} stops · {visitedCount} visited</p></div>{item.bookingStatus && <span className="tag">{item.bookingStatus}</span>}</div>
+          <div className="group-controls"><input aria-label={`Time for ${place.name}`} type="time" value={item.time ?? ''} onChange={event => commit(() => db.items.update(item.id,{time:event.target.value||undefined,updatedAt:timestamp()}))}/><select aria-label={`Booking status for ${place.name}`} value={item.bookingStatus ?? ''} onChange={event => commit(() => db.items.update(item.id,{bookingStatus:(event.target.value||undefined) as BookingStatus|undefined,updatedAt:timestamp()}))}><option value="">Status not set</option>{['Idea','To book','Booked','Confirmed','Cancelled'].map(status=><option key={status}>{status}</option>)}</select></div>
+          <details className="tour-stops"><summary><span>View route stops</span><strong>{visitedCount}/{children.length}</strong></summary><ol>{children.map(child => {
+            const childPlace = data.places.find(candidate => candidate.id === child.placeId)!
+            return <li className={child.visited ? 'stop-visited' : ''} key={child.id}><div className="stop-copy"><strong>{childPlace.name}</strong>{child.notes && <small>{child.notes}</small>}{child.visited && <small className="photo-hint">Stamp created · add a photo in Stamps</small>}</div><div className="stop-actions">{childPlace.googleMapsUrl && <a href={childPlace.googleMapsUrl} target="_blank" rel="noreferrer" aria-label={`Open ${childPlace.name} in Google Maps`}>Map ↗</a>}<button className={child.visited ? 'visited' : ''} onClick={() => visited(child,childPlace)}>{child.visited ? 'Undo visited' : 'Visit + stamp'}</button></div></li>
+          })}</ol></details>
+          <div className="item-actions"><button disabled={index===0||busy} onClick={() => move(item,-1)}>↑ Earlier</button><button disabled={index===items.length-1||busy} onClick={() => move(item,1)}>↓ Later</button><select aria-label={`Move ${place.name} to day`} value={item.dayId} onChange={event => commit(() => moveItineraryGroup(item.id,event.target.value), 'Activity moved with all stops.')}>{data.days.map(targetDay => <option key={targetDay.id} value={targetDay.id}>{targetDay.date}</option>)}</select><button onClick={() => confirm(`Delete ${place.name}? Visited stop stamps and photos will remain as detached memories.`) && commit(() => deleteItineraryGroup(item.id), 'Activity deleted; visited memories preserved.')}>Delete</button></div>
+        </article>
+      }
+      return <article className="card itinerary-item" key={item.id}><div className="time">{item.time || 'Any time'}</div><div className="itinerary-body"><div className="row"><h3>{place?.name}</h3>{item.bookingStatus && <span className="tag">{item.bookingStatus}</span>}</div>{place?.address && <p>{place.address}</p>}{item.notes && <p>{item.notes}</p>}<div className="item-actions"><input aria-label={`Time for ${place.name}`} type="time" value={item.time ?? ''} onChange={e => commit(() => db.items.update(item.id,{time:e.target.value||undefined,updatedAt:timestamp()}))}/><select aria-label={`Booking status for ${place.name}`} value={item.bookingStatus ?? ''} onChange={e => commit(() => db.items.update(item.id,{bookingStatus:(e.target.value||undefined) as BookingStatus|undefined,updatedAt:timestamp()}))}><option value="">Status not set</option>{['Idea','To book','Booked','Confirmed','Cancelled'].map(x=><option key={x}>{x}</option>)}</select><button disabled={index===0||busy} onClick={() => move(item,-1)}>↑ Earlier</button><button disabled={index===items.length-1||busy} onClick={() => move(item,1)}>↓ Later</button><select aria-label="Move to day" value={item.dayId} onChange={e => commit(() => db.items.update(item.id,{dayId:e.target.value,updatedAt:timestamp()}))}>{data.days.map(d => <option key={d.id} value={d.id}>{d.date}</option>)}</select>{place?.googleMapsUrl && <a href={place.googleMapsUrl} target="_blank" rel="noreferrer">Google Maps ↗</a>}<button className={item.visited ? 'visited' : ''} onClick={() => visited(item,place)}>{item.visited ? 'Undo visited' : 'Mark visited'}</button><button onClick={() => confirm('Delete this itinerary item? Its stamp becomes a detached memory.') && commit(() => deleteItineraryItem(item.id))}>Delete</button></div></div></article>
+    })}
     {day && <PlaceForm dayId={day.id} onSave={savePlace} />}</div>
 }
 
@@ -126,25 +138,10 @@ function Ideas({ data, commit, busy }: SectionProps) {
     if (await db.items.where('placeId').equals(place.id).count()) throw new Error('Remove this place from the itinerary before deleting it from Ideas.')
     await db.places.delete(place.id)
   }), 'Place deleted.')
-  const materialize = (template: ActivityTemplate, dayId: string) => commit(() => db.transaction('rw', [db.places, db.items], async () => {
-    const basePosition = Date.now()
-    for (const [index, stop] of template.stops.entries()) {
-      let place = stop.placeId ? await db.places.get(stop.placeId) : undefined
-      place ??= await db.places.filter(candidate => candidate.name === stop.placeName).first()
-      if (!place) {
-        const now = timestamp()
-        place = { id: makeId(), name: stop.placeName, wantToVisit: false, seeded: true, createdAt: now, updatedAt: now }
-        await db.places.add(place)
-      }
-      const noteParts = [...stop.notes]
-      if (stop.optional) noteParts.unshift('Optional')
-      if (stop.approximateMinutes) noteParts.push(`Approx. ${stop.approximateMinutes >= 60 && stop.approximateMinutes % 60 === 0 ? `${stop.approximateMinutes / 60} hour` : `${stop.approximateMinutes} min`}`)
-      await db.items.add({
-        id: makeId(), dayId, placeId: place.id, notes: noteParts.join(' · '), visited: false,
-        position: basePosition + index, createdAt: timestamp(), updatedAt: timestamp(),
-      })
-    }
-  }), `${template.name} added as ${template.stops.length} editable ${template.stops.length === 1 ? 'stop' : 'stops'}.`)
+  const materialize = (template: ActivityTemplate, dayId: string) => commit(
+    () => materializeTemplate(template, dayId),
+    template.stops.length > 1 ? `${template.name} added as one itinerary activity with ${template.stops.length} stops.` : `${template.name} added to the itinerary.`,
+  )
   const templateToWishlist = (template: ActivityTemplate) => {
     const id = `template-wishlist-${template.id}`
     return commit(() => db.places.put({

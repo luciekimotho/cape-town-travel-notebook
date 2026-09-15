@@ -333,6 +333,29 @@ button:hover:not(:disabled), .file-button:hover { background: var(--turquoise-da
 }
 .itinerary-body { padding: 16px; }
 .itinerary-body h3 { margin: 0; }
+.itinerary-group { padding: 0; overflow: hidden; border: 2px solid var(--ink); }
+.itinerary-group::after { display: none; }
+.group-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 17px 13px; background: linear-gradient(100deg, #e2f1ed, var(--paper)); border-left: 7px solid var(--turquoise); }
+.group-heading h3 { margin: 0 0 4px; font-size: 1.45rem; }
+.group-heading p { margin-bottom: 0; color: var(--muted); font-size: .8rem; }
+.group-controls { display: grid; grid-template-columns: minmax(120px,.65fr) minmax(160px,1fr); gap: 8px; padding: 0 17px 14px; background: var(--paper); }
+.tour-stops { border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); background: #fffdf7; }
+.tour-stops summary { min-height: 50px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 17px; color: var(--turquoise-dark); font-weight: 900; cursor: pointer; list-style: none; }
+.tour-stops summary::-webkit-details-marker { display: none; }
+.tour-stops summary span::before { content: "▸"; display: inline-block; margin-right: 8px; transition: transform .16s ease; }
+.tour-stops[open] summary span::before { transform: rotate(90deg); }
+.tour-stops summary strong { min-width: 48px; padding: 4px 8px; color: var(--ink); background: var(--mustard); border-radius: 99px; font-size: .72rem; text-align: center; }
+.tour-stops ol { margin: 0; padding: 0 15px 11px 48px; }
+.tour-stops li { padding: 11px 3px 11px 1px; border-top: 1px dashed var(--line); }
+.tour-stops li::marker { color: var(--cobalt); font-weight: 900; }
+.tour-stops li.stop-visited::marker { color: var(--leaf); }
+.stop-copy strong { display: block; line-height: 1.2; }
+.stop-copy small { display: block; margin-top: 3px; color: var(--muted); font-size: .73rem; line-height: 1.4; }
+.stop-copy .photo-hint { color: var(--leaf-dark); font-weight: 800; }
+.stop-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
+.stop-actions a, .stop-actions button { min-height: 40px; padding: 7px 10px; color: var(--turquoise-dark); background: transparent; border: 1.5px solid var(--line); border-radius: 7px; box-shadow: none; font-size: .72rem; font-weight: 800; text-decoration: none; }
+.stop-actions button:hover:not(:disabled), .stop-actions a:hover { color: #fff; background: var(--turquoise-dark); border-color: var(--turquoise-dark); }
+.itinerary-group > .item-actions { margin: 0; padding: 12px 16px 15px; background: var(--paper); }
 .tag {
   display: inline-flex;
   padding: 4px 8px;
@@ -512,6 +535,8 @@ nav button:nth-child(4).active { background: var(--leaf-dark); }
   .wishlist { display: block; }
   .totals strong { font-size: .72rem; }
   .item-actions select, .item-actions input { max-width: 100%; }
+  .group-controls { grid-template-columns: 1fr; }
+  .tour-stops ol { padding-left: 40px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }

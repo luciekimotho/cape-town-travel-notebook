@@ -6,7 +6,7 @@ const photoPath = (photo: Pick<PhotoEntry, 'id' | 'mimeType'>) => `photos/${phot
 
 export async function createBackup(data: AppData): Promise<Blob> {
   const zip = new JSZip()
-  const backup: BackupData = { schemaVersion: 2, exportedAt: new Date().toISOString(), trip: data.trip, checklist: data.checklist, days: data.days, items: data.items, places: data.places, activityTemplates: data.activityTemplates, expenses: data.expenses, stamps: data.stamps, photos: data.photos.map(({ blob: _blob, ...photo }) => photo), rateSets: data.rateSets, metadata: data.metadata }
+  const backup: BackupData = { schemaVersion: 3, exportedAt: new Date().toISOString(), trip: data.trip, checklist: data.checklist, days: data.days, items: data.items, places: data.places, activityTemplates: data.activityTemplates, expenses: data.expenses, stamps: data.stamps, photos: data.photos.map(({ blob: _blob, ...photo }) => photo), rateSets: data.rateSets, metadata: data.metadata }
   zip.file('notebook.json', JSON.stringify(backup, null, 2))
   data.photos.forEach(photo => zip.file(photoPath(photo), photo.blob))
   return zip.generateAsync({ type: 'blob', compression: 'DEFLATE' })
@@ -50,7 +50,7 @@ export async function parseBackup(file: File): Promise<AppData> {
   try { raw = JSON.parse(await jsonFile.async('text')) } catch { throw new Error('Backup JSON is invalid.') }
   if (!raw || typeof raw !== 'object') throw new Error('Backup data is invalid.')
   const backup = raw as Partial<Omit<BackupData, 'schemaVersion'>> & { schemaVersion?: number }
-  if (backup.schemaVersion !== 1 && backup.schemaVersion !== 2) throw new Error('Unsupported backup version.')
+  if (backup.schemaVersion !== 1 && backup.schemaVersion !== 2 && backup.schemaVersion !== 3) throw new Error('Unsupported backup version.')
   if (backup.schemaVersion === 1 && !('activityTemplates' in backup)) {
     backup.activityTemplates = []
   }

@@ -37,6 +37,7 @@ class TravelDatabase extends Dexie {
       photos: 'id, stampId', rateSets: 'id, active', metadata: 'key',
     })
     this.version(2).stores({ activityTemplates: 'id, name, seeded' })
+    this.version(3).stores({ items: 'id, dayId, placeId, parentId, position, visited' })
   }
 }
 export const db = new TravelDatabase()
@@ -51,7 +52,6 @@ const placeId = (name: string) => `seed-place-${name.toLowerCase().replace(/&/g,
 const mapsUrl = (name: string) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${name}, Cape Town, South Africa`)}`
 
 async function ensurePlanningSeeds() {
-  if ((await db.metadata.get('planningSeedsV1'))?.value === 'complete') return
   const createdAt = now()
   const places: Place[] = seededPlaceNames.map(name => ({
     id: placeId(name), name, googleMapsUrl: mapsUrl(name), wantToVisit: false, seeded: true, createdAt, updatedAt: createdAt,
@@ -91,15 +91,17 @@ async function ensurePlanningSeeds() {
     },
   ]
   await db.transaction('rw', [db.places, db.activityTemplates, db.metadata], async () => {
+    if ((await db.metadata.get('planningSeedsV1'))?.value === 'complete') return
     for (const place of places) if (!(await db.places.get(place.id))) await db.places.add(place)
     await db.activityTemplates.bulkPut(templates)
     await db.metadata.put({ key: 'planningSeedsV1', value: 'complete' })
-    await db.metadata.put({ key: 'schemaVersion', value: '2' })
+    await db.metadata.put({ key: 'schemaVersion', value: '3' })
   })
 }
 
 export async function initializeDatabase() {
-  if (!(await db.trips.get('current'))) {
+  await db.transaction('rw', [db.trips, db.checklist, db.days, db.rateSets, db.metadata], async () => {
+    if (await db.trips.get('current')) return
     const timestamp = now()
     const trip: Trip = { id: 'current', destination: 'Cape Town, South Africa', travellers: 2, startDate: '2026-09-21', endDate: '2026-09-28', timezone: 'Africa/Johannesburg', notes: '', updatedAt: timestamp }
     const checklist: ChecklistItem[] = [
@@ -108,12 +110,11 @@ export async function initializeDatabase() {
     ].map(([title, category]) => ({ id: makeId(), title, category, completed: false, note: 'Starter suggestion — verify for your trip.', createdAt: timestamp, updatedAt: timestamp }))
     const days = datesBetween(trip.startDate, trip.endDate).map(date => ({ id: date, date, outOfRange: false }))
     const exampleRates: RateSet = { id: makeId(), label: 'Example rates — activate only after reviewing', effectiveDate: '2026-09-01', kesPerKes: 1, kesPerUsd: 129, kesPerZar: 7.2, active: false, example: true, createdAt: timestamp }
-    await db.transaction('rw', [db.trips, db.checklist, db.days, db.rateSets, db.metadata], async () => {
-      await db.trips.add(trip); await db.checklist.bulkAdd(checklist); await db.days.bulkAdd(days); await db.rateSets.add(exampleRates)
-      await db.metadata.bulkAdd([{ key: 'schemaVersion', value: '2' }, { key: 'displayCurrency', value: 'KES' }])
-    })
-  }
+    await db.trips.add(trip); await db.checklist.bulkAdd(checklist); await db.days.bulkAdd(days); await db.rateSets.add(exampleRates)
+    await db.metadata.bulkAdd([{ key: 'schemaVersion', value: '3' }, { key: 'displayCurrency', value: 'KES' }])
+  })
   await ensurePlanningSeeds()
+  await db.metadata.put({ key: 'schemaVersion', value: '3' })
 }
 
 export async function loadData(): Promise<AppData> {
@@ -140,8 +141,77 @@ export async function saveTrip(trip: Trip) {
 export async function deleteItineraryItem(id: string) {
   await db.transaction('rw', [db.items, db.stamps], async () => {
     const stamp = await db.stamps.where('itineraryItemId').equals(id).first()
-    if (stamp) await db.stamps.update(stamp.id, { itineraryItemId: undefined, detached: true })
+    if (stamp) await db.stamps.where('id').equals(stamp.id).modify(memory => {
+      delete memory.itineraryItemId
+      memory.detached = true
+    })
     await db.items.delete(id)
+  })
+}
+
+export async function materializeTemplate(template: ActivityTemplate, dayId: string) {
+  await db.transaction('rw', [db.places, db.items], async () => {
+    const createdAt = now()
+    if (template.stops.length === 1) {
+      const stop = template.stops[0]
+      let place = stop.placeId ? await db.places.get(stop.placeId) : undefined
+      place ??= await db.places.filter(candidate => candidate.name === stop.placeName).first()
+      if (!place) {
+        place = { id: makeId(), name: stop.placeName, notes: template.description, wantToVisit: false, seeded: true, createdAt, updatedAt: createdAt }
+        await db.places.add(place)
+      }
+      await db.items.add({ id: makeId(), dayId, placeId: place.id, templateId: template.id, notes: stop.notes.join(' · ') || undefined, visited: false, position: Date.now(), createdAt, updatedAt: createdAt })
+      return
+    }
+
+    const groupPlace: Place = {
+      id: makeId(), name: template.name, notes: template.description, wantToVisit: false,
+      seeded: false, createdAt, updatedAt: createdAt,
+    }
+    const parent: ItineraryItem = {
+      id: makeId(), dayId, placeId: groupPlace.id, templateId: template.id, isActivityGroup: true,
+      visited: false, position: Date.now(), createdAt, updatedAt: createdAt,
+    }
+    await db.places.add(groupPlace)
+    await db.items.add(parent)
+    for (const [index, stop] of template.stops.entries()) {
+      let place = stop.placeId ? await db.places.get(stop.placeId) : undefined
+      place ??= await db.places.filter(candidate => candidate.name === stop.placeName).first()
+      if (!place) {
+        place = { id: makeId(), name: stop.placeName, wantToVisit: false, seeded: true, createdAt, updatedAt: createdAt }
+        await db.places.add(place)
+      }
+      const noteParts = [...stop.notes]
+      if (stop.optional) noteParts.unshift('Optional')
+      if (stop.approximateMinutes) noteParts.push(`Approx. ${stop.approximateMinutes >= 60 && stop.approximateMinutes % 60 === 0 ? `${stop.approximateMinutes / 60} hour` : `${stop.approximateMinutes} min`}`)
+      await db.items.add({
+        id: makeId(), dayId, placeId: place.id, parentId: parent.id, templateId: template.id,
+        notes: noteParts.join(' · '), visited: false, position: index, createdAt, updatedAt: createdAt,
+      })
+    }
+  })
+}
+
+export async function moveItineraryGroup(parentId: string, dayId: string) {
+  await db.transaction('rw', db.items, async () => {
+    await db.items.update(parentId, { dayId, updatedAt: now() })
+    await db.items.where('parentId').equals(parentId).modify({ dayId, updatedAt: now() })
+  })
+}
+
+export async function deleteItineraryGroup(parentId: string) {
+  await db.transaction('rw', [db.items, db.places, db.stamps], async () => {
+    const parent = await db.items.get(parentId)
+    const children = await db.items.where('parentId').equals(parentId).toArray()
+    for (const child of children) {
+      const stamp = await db.stamps.where('itineraryItemId').equals(child.id).first()
+      if (stamp) await db.stamps.where('id').equals(stamp.id).modify(memory => {
+        delete memory.itineraryItemId
+        memory.detached = true
+      })
+    }
+    await db.items.bulkDelete([parentId, ...children.map(child => child.id)])
+    if (parent) await db.places.delete(parent.placeId)
   })
 }
 

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { db, datesBetween, initializeDatabase, loadData, saveTrip } from './db'
+import { db, datesBetween, deleteItineraryGroup, initializeDatabase, loadData, materializeTemplate, saveTrip } from './db'
 
 beforeEach(async () => {
   await db.delete()
@@ -37,6 +37,43 @@ describe('Phase 1 persistence', () => {
     expect(data.activityTemplates).toHaveLength(3)
     expect(data.items).toHaveLength(0)
     expect(data.activityTemplates.flatMap(template => template.stops).every(stop => stop.approximateMinutes === undefined || stop.approximateMinutes > 0)).toBe(true)
+  })
+
+  it('initializes safely when React Strict Mode starts twice', async () => {
+    await Promise.all([initializeDatabase(), initializeDatabase()])
+    const data = await loadData()
+    expect(data.trip.id).toBe('current')
+    expect(data.places.filter(place => place.seeded)).toHaveLength(14)
+    expect(data.activityTemplates).toHaveLength(3)
+  })
+
+  it('materializes a multi-stop tour as one parent with visitable child stops', async () => {
+    await initializeDatabase()
+    const data = await loadData()
+    const template = data.activityTemplates.find(item => item.name === 'Cape Peninsula Tour')!
+    await materializeTemplate(template, '2026-09-24')
+    const scheduled = (await loadData()).items.filter(item => item.dayId === '2026-09-24')
+    const parent = scheduled.find(item => item.isActivityGroup)
+    expect(parent?.templateId).toBe(template.id)
+    expect(scheduled.filter(item => item.parentId === parent?.id)).toHaveLength(9)
+    expect(scheduled.filter(item => !item.parentId)).toHaveLength(1)
+  })
+
+  it('preserves visited child stamps as detached memories when a tour is deleted', async () => {
+    await initializeDatabase()
+    const data = await loadData()
+    const template = data.activityTemplates.find(item => item.name === 'Cape Peninsula Tour')!
+    await materializeTemplate(template, '2026-09-24')
+    const scheduled = (await loadData()).items.filter(item => item.dayId === '2026-09-24')
+    const parent = scheduled.find(item => item.isActivityGroup)!
+    const child = scheduled.find(item => item.parentId === parent.id)!
+    await db.stamps.add({ id: 'tour-stamp', itineraryItemId: child.id, placeName: 'Bo-Kaap', visitDate: '2026-09-24', detached: false, createdAt: new Date().toISOString() })
+    await deleteItineraryGroup(parent.id)
+    expect(await db.items.where('parentId').equals(parent.id).count()).toBe(0)
+    expect(await db.items.get(parent.id)).toBeUndefined()
+    const detached = await db.stamps.get('tour-stamp')
+    expect(detached).toMatchObject({ detached: true })
+    expect(detached).not.toHaveProperty('itineraryItemId')
   })
 
   it('preserves and flags days when trip dates are shortened', async () => {
