@@ -94,7 +94,7 @@ export default function App() {
 
   if (!data) return <main className="loading"><span className="stamp-mark">CT</span><p>Opening your notebook…</p>{error && <p role="alert">{error}</p>}</main>
   return <div className="app-shell">
-    <header><div className="bo-kaap-strip" aria-hidden="true"><i/><i/><i/><i/></div><div className="trip-heading"><div><p className="eyebrow">Field notes · 2026</p><h1>{data.trip.destination}</h1><p>{data.trip.startDate} → {data.trip.endDate} · {data.trip.travellers} adults</p></div><span className={`cache-status ${offlineStatus}`}><i/>{offlineStatus === 'ready' ? 'Offline ready' : offlineStatus === 'unavailable' ? 'Offline cache unavailable' : 'Preparing offline cache'}</span></div></header>
+    <header><div className="bo-kaap-strip" aria-hidden="true"><i/><i/><i/><i/></div><div className="trip-heading"><div><p className="eyebrow">Field notes · 2026</p><h1>{data.trip.destination}</h1><p>{data.trip.startDate} → {data.trip.endDate} · {data.trip.travellers} adults</p></div>{offlineStatus !== 'checking' && <span className={`cache-status ${offlineStatus}`}><i/>{offlineStatus === 'ready' ? 'Offline ready' : 'Offline cache unavailable'}</span>}</div></header>
     {(error || notice) && <div className={error ? 'message error' : 'message'} role={error ? 'alert' : 'status'}>{error || notice}<button onClick={() => { setError(''); setNotice('') }} aria-label="Dismiss">×</button></div>}
     <main>
       {tab === 'plan' && <Plan data={data} commit={commit} busy={busy} />}
@@ -150,10 +150,36 @@ function PlaceForm({ onSave, dayId, onSaved, onCancel }: { onSave: (place: Place
 function Itinerary({ data, commit, busy }: SectionProps) {
   const [openDay, setOpenDay] = useState(data.days.find(d => !d.outOfRange)?.id ?? data.days[0]?.id)
   const [addOpen, setAddOpen] = useState(false)
+  const [addActivityOpen, setAddActivityOpen] = useState(false)
   const day = data.days.find(d => d.id === openDay)
   const dayItems = data.items.filter(i => i.dayId === openDay)
   const items = dayItems.filter(item => !item.parentId).sort((a,b) => a.position-b.position)
   const savePlace = (place: Place, item?: ItineraryItem) => commit(() => db.transaction('rw', [db.places,db.items], async () => { await db.places.put(place); if (item) await db.items.put(item) }), 'Itinerary saved.')
+  const saveActivity = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!day) return
+    const form = event.currentTarget
+    const formData = new FormData(form)
+    const name = String(formData.get('name')).trim()
+    const childNames = String(formData.get('children')).split('\n').map(value => value.trim()).filter(Boolean)
+    const saved = await commit(() => db.transaction('rw', [db.places, db.items], async () => {
+      if (!name || !childNames.length) throw new Error('Add a parent name and at least one child activity.')
+      const createdAt = timestamp()
+      const groupPlace: Place = { id: makeId(), name, wantToVisit: false, seeded: false, createdAt, updatedAt: createdAt }
+      const parentId = makeId()
+      await db.places.add(groupPlace)
+      await db.items.add({ id: parentId, dayId: day.id, placeId: groupPlace.id, isActivityGroup: true, visited: false, position: Date.now(), createdAt, updatedAt: createdAt })
+      for (const [position, childName] of childNames.entries()) {
+        let childPlace = await db.places.filter(place => place.name === childName).first()
+        if (!childPlace) {
+          childPlace = { id: makeId(), name: childName, wantToVisit: false, seeded: false, createdAt, updatedAt: createdAt }
+          await db.places.add(childPlace)
+        }
+        await db.items.add({ id: makeId(), dayId: day.id, placeId: childPlace.id, parentId, visited: false, position, createdAt, updatedAt: createdAt })
+      }
+    }), 'Parent activity and child activities added.')
+    if (saved) { form.reset(); setAddActivityOpen(false) }
+  }
   const move = (item: ItineraryItem, direction: -1|1) => {
     const index = items.findIndex(i => i.id === item.id); const swap = items[index + direction]; if (!swap) return
     commit(() => db.transaction('rw', db.items, async () => { await db.items.update(item.id,{position:swap.position}); await db.items.update(swap.id,{position:item.position}) }))
@@ -167,7 +193,7 @@ function Itinerary({ data, commit, busy }: SectionProps) {
     }
     else { await db.stamps.add({id:makeId(),itineraryItemId:item.id,placeName:place.name,visitDate:day!.date,detached:false,createdAt:timestamp()}); await db.items.update(item.id,{visited:true,updatedAt:timestamp()}) }
   }), item.visited ? 'Visit undone.' : 'Stamp added.')
-  return <div className="stack"><div className="surface-actions"><div className="date-strip">{data.days.map(d => <button key={d.id} className={`${openDay === d.id ? 'active' : ''} ${d.outOfRange ? 'flagged' : ''}`} onClick={() => setOpenDay(d.id)}><small>{formatDate(d.date).split(' ')[0]}</small><strong>{d.date.slice(-2)}</strong>{d.outOfRange && <span>!</span>}</button>)}</div><button className="add-action" onClick={() => setAddOpen(true)}>+ Add place</button></div>{day?.outOfRange && <p className="warning">This existing day falls outside the current trip dates. Move or remove its items when ready.</p>}
+  return <div className="stack"><div className="surface-actions itinerary-surface-actions"><div className="date-strip">{data.days.map(d => <button key={d.id} className={`${openDay === d.id ? 'active' : ''} ${d.outOfRange ? 'flagged' : ''}`} onClick={() => setOpenDay(d.id)}><small>{formatDate(d.date).split(' ')[0]}</small><strong>{d.date.slice(-2)}</strong>{d.outOfRange && <span>!</span>}</button>)}</div><div className="itinerary-add-actions"><button className="add-action" onClick={() => setAddOpen(true)}>+ Place</button><button className="add-action ghost" onClick={() => setAddActivityOpen(true)}>+ Parent activity</button></div></div>{day?.outOfRange && <p className="warning">This existing day falls outside the current trip dates. Move or remove its items when ready.</p>}
     {items.map((item,index) => {
       const place = data.places.find(candidate => candidate.id === item.placeId)!
       if (item.isActivityGroup) {
@@ -184,7 +210,9 @@ function Itinerary({ data, commit, busy }: SectionProps) {
       }
       return <article className="card itinerary-item" key={item.id}><div className="time">{item.time || 'Any time'}</div><div className="itinerary-body"><div className="row"><h3>{place?.name}</h3>{item.bookingStatus && <span className="tag">{item.bookingStatus}</span>}</div>{place?.address && <p>{place.address}</p>}{item.notes && <p>{item.notes}</p>}<div className="primary-actions">{place?.googleMapsUrl && <a href={place.googleMapsUrl} target="_blank" rel="noreferrer">Google Maps ↗</a>}<button className={item.visited ? 'visited' : ''} onClick={() => visited(item,place)}>{item.visited ? 'Undo visited' : 'Mark visited'}</button></div><details className="more itinerary-more"><summary>More</summary><div className="more-panel"><div className="group-controls"><label>Time<input aria-label={`Time for ${place.name}`} type="time" value={item.time ?? ''} onChange={e => commit(() => db.items.update(item.id,{time:e.target.value||undefined,updatedAt:timestamp()}))}/></label><label>Status<select aria-label={`Booking status for ${place.name}`} value={item.bookingStatus ?? ''} onChange={e => commit(() => db.items.update(item.id,{bookingStatus:(e.target.value||undefined) as BookingStatus|undefined,updatedAt:timestamp()}))}><option value="">Status not set</option>{['Idea','To book','Booked','Confirmed','Cancelled'].map(x=><option key={x}>{x}</option>)}</select></label></div><div className="item-actions"><button disabled={index===0||busy} onClick={() => move(item,-1)}>↑ Earlier</button><button disabled={index===items.length-1||busy} onClick={() => move(item,1)}>↓ Later</button><select aria-label="Move to day" value={item.dayId} onChange={e => commit(() => db.items.update(item.id,{dayId:e.target.value,updatedAt:timestamp()}))}>{data.days.map(d => <option key={d.id} value={d.id}>{d.date}</option>)}</select><button onClick={() => confirm('Delete this itinerary item? Its stamp becomes a detached memory.') && commit(() => deleteItineraryItem(item.id))}>Delete</button></div></div></details></div></article>
     })}
-    {day && <Sheet open={addOpen} title={`Add to ${formatDate(day.date)}`} onClose={() => setAddOpen(false)}><PlaceForm dayId={day.id} onSave={savePlace} onSaved={() => setAddOpen(false)} onCancel={() => setAddOpen(false)}/></Sheet>}</div>
+    {day && <Sheet open={addOpen} title={`Add to ${formatDate(day.date)}`} onClose={() => setAddOpen(false)}><PlaceForm dayId={day.id} onSave={savePlace} onSaved={() => setAddOpen(false)} onCancel={() => setAddOpen(false)}/></Sheet>}
+    {day && <Sheet open={addActivityOpen} title={`Add a parent activity to ${formatDate(day.date)}`} onClose={() => setAddActivityOpen(false)}><form className="form-card" onSubmit={saveActivity}><label>Parent activity name<input name="name" required placeholder="Cape Peninsula day"/></label><label>Child activities, one per line<textarea name="children" required placeholder={'Bo-Kaap\nBoulders Beach\nCape Point'}/></label><p className="form-hint">Each child can be marked visited and receive its own photo stamp.</p><div className="actions"><button type="button" className="ghost" onClick={() => setAddActivityOpen(false)}>Cancel</button><button disabled={busy}>Add activity</button></div></form></Sheet>}
+  </div>
 }
 
 function Ideas({ data, commit, busy }: SectionProps) {
@@ -201,28 +229,27 @@ function Ideas({ data, commit, busy }: SectionProps) {
   }), 'Place deleted.')
   const materialize = (template: ActivityTemplate, dayId: string) => commit(
     () => materializeTemplate(template, dayId),
-    template.stops.length > 1 ? `${template.name} added as one itinerary activity with ${template.stops.length} stops.` : `${template.name} added to the itinerary.`,
+    template.stops.length > 1 ? `${template.name} added with ${template.stops.length} child activities.` : `${template.name} added to the itinerary.`,
   )
   const templateToWishlist = (template: ActivityTemplate) => {
     const id = `template-wishlist-${template.id}`
     return commit(() => db.places.put({
-      id, name: template.name, notes: template.description, wantToVisit: true, seeded: true,
+      id, name: template.name, wantToVisit: true, seeded: true,
       createdAt: timestamp(), updatedAt: timestamp(),
     }), `${template.name} added to Want to visit.`)
   }
   return <div className="stack">
-    <div className="idea-intro"><p className="eyebrow">Planning library</p><p>Nothing here is booked or scheduled. Add a place to a day or save it to Want to visit when it earns a spot.</p></div>
-    <h3 className="subheading">Activity templates</h3>
+    <h3 className="subheading">Activities</h3>
     {data.activityTemplates.map(template => <article className="card template-card" key={template.id}>
       {editingTemplate === template.id ? <form className="form-card" onSubmit={async event => {
         event.preventDefault(); const form = event.currentTarget; const fd = new FormData(form)
-        if (await commit(() => db.activityTemplates.update(template.id, { name: String(fd.get('name')), description: String(fd.get('description')), updatedAt: timestamp() }), 'Template updated.')) setEditingTemplate(undefined)
-      }}><label>Name<input name="name" required defaultValue={template.name}/></label><label>Description<textarea name="description" defaultValue={template.description}/></label><div className="actions"><button type="button" className="ghost" onClick={() => setEditingTemplate(undefined)}>Cancel</button><button>Save template</button></div></form> : <>
-        <div className="row"><div><p className="eyebrow">Reusable template</p><h3>{template.name}</h3></div><span className="tag">{template.stops.length} {template.stops.length === 1 ? 'stop' : 'stops'}</span></div><p>{template.description}</p>
-        <details className="route-details"><summary>{template.stops.length > 1 ? `View ${template.stops.length}-stop route` : 'View activity details'}</summary><ol className="template-stops">{template.stops.map(stop => <li key={stop.id}><strong>{stop.placeName}</strong>{stop.optional && <span className="tag">Optional</span>}<small>{[...stop.notes, stop.approximateMinutes ? `Approx. ${stop.approximateMinutes >= 60 && stop.approximateMinutes % 60 === 0 ? `${stop.approximateMinutes / 60} hour` : `${stop.approximateMinutes} min`}` : ''].filter(Boolean).join(' · ')}</small></li>)}</ol></details>
+        if (await commit(() => db.activityTemplates.update(template.id, { name: String(fd.get('name')), updatedAt: timestamp() }), 'Activity updated.')) setEditingTemplate(undefined)
+      }}><label>Name<input name="name" required defaultValue={template.name}/></label><div className="actions"><button type="button" className="ghost" onClick={() => setEditingTemplate(undefined)}>Cancel</button><button>Save activity</button></div></form> : <>
+        <div className="row"><h3>{template.name}</h3><span className="tag">{template.stops.length} {template.stops.length === 1 ? 'activity' : 'activities'}</span></div>
+        <details className="route-details"><summary>{template.stops.length > 1 ? `View ${template.stops.length} child activities` : 'View activity details'}</summary><ol className="template-stops">{template.stops.map(stop => <li key={stop.id}><strong>{stop.placeName}</strong>{stop.optional && <span className="tag">Optional</span>}<small>{[...stop.notes, stop.approximateMinutes ? `Approx. ${stop.approximateMinutes >= 60 && stop.approximateMinutes % 60 === 0 ? `${stop.approximateMinutes / 60} hour` : `${stop.approximateMinutes} min`}` : ''].filter(Boolean).join(' · ')}</small></li>)}</ol></details>
         <div className="primary-actions"><button aria-expanded={scheduling === template.id} aria-controls={`schedule-${template.id}`} onClick={() => { setScheduling(scheduling === template.id ? undefined : template.id); setScheduleDay('') }}>Add to day</button><button className="ghost" onClick={() => templateToWishlist(template)}>Want to visit</button></div>
         {scheduling === template.id && <div className="schedule-disclosure" id={`schedule-${template.id}`}><label>Choose a day<select value={scheduleDay} aria-label={`Day for ${template.name}`} onChange={event => setScheduleDay(event.target.value)}><option value="">Select a date…</option>{data.days.map(day => <option key={day.id} value={day.id}>{day.date}</option>)}</select></label><button disabled={!scheduleDay || busy} onClick={async () => { if (await materialize(template, scheduleDay)) { setScheduling(undefined); setScheduleDay('') } }}>Add activity</button></div>}
-        <details className="more"><summary>More</summary><div className="more-panel"><button onClick={() => setEditingTemplate(template.id)}>Edit template</button><button disabled={busy} onClick={() => confirm(`Delete the ${template.name} template? Existing itinerary items will remain.`) && commit(() => db.activityTemplates.delete(template.id), 'Template deleted.')}>Delete template</button></div></details>
+        <details className="more"><summary>More</summary><div className="more-panel"><button onClick={() => setEditingTemplate(template.id)}>Edit activity</button><button disabled={busy} onClick={() => confirm(`Delete ${template.name} from Activities? Existing itinerary items will remain.`) && commit(() => db.activityTemplates.delete(template.id), 'Activity deleted.')}>Delete activity</button></div></details>
       </>}
     </article>)}
     <h3 className="subheading">Places</h3>
@@ -231,7 +258,7 @@ function Ideas({ data, commit, busy }: SectionProps) {
         event.preventDefault(); const form = event.currentTarget; const fd = new FormData(form)
         if (await commit(() => db.places.update(place.id, { name: String(fd.get('name')), googleMapsUrl: String(fd.get('maps')) || undefined, notes: String(fd.get('notes')) || undefined, updatedAt: timestamp() }), 'Place updated.')) setEditingPlace(undefined)
       }}><label>Name<input name="name" required defaultValue={place.name}/></label><label>Google Maps URL<input name="maps" type="url" defaultValue={place.googleMapsUrl}/></label><label>Notes<textarea name="notes" defaultValue={place.notes}/></label><div className="actions"><button type="button" className="ghost" onClick={() => setEditingPlace(undefined)}>Cancel</button><button>Save place</button></div></form> : <>
-        <h3>{place.name}</h3>{place.notes && <p>{place.notes}</p>}<div className="primary-actions"><button aria-expanded={scheduling === place.id} aria-controls={`schedule-${place.id}`} onClick={() => { setScheduling(scheduling === place.id ? undefined : place.id); setScheduleDay('') }}>Add to day</button><button className="ghost" disabled={place.wantToVisit} onClick={() => commit(() => db.places.update(place.id, { wantToVisit: true, updatedAt: timestamp() }), 'Added to Want to visit.')}>{place.wantToVisit ? 'In Want to visit' : 'Want to visit'}</button></div>
+        <h3>{place.name}</h3><div className="primary-actions"><button aria-expanded={scheduling === place.id} aria-controls={`schedule-${place.id}`} onClick={() => { setScheduling(scheduling === place.id ? undefined : place.id); setScheduleDay('') }}>Add to day</button><button className="ghost" disabled={place.wantToVisit} onClick={() => commit(() => db.places.update(place.id, { wantToVisit: true, updatedAt: timestamp() }), 'Added to Want to visit.')}>{place.wantToVisit ? 'In Want to visit' : 'Want to visit'}</button></div>
         {scheduling === place.id && <div className="schedule-disclosure" id={`schedule-${place.id}`}><label>Choose a day<select value={scheduleDay} aria-label={`Day for ${place.name}`} onChange={event => setScheduleDay(event.target.value)}><option value="">Select a date…</option>{data.days.map(day => <option key={day.id} value={day.id}>{day.date}</option>)}</select></label><button disabled={!scheduleDay || busy} onClick={async () => { if (await schedulePlace(place, scheduleDay)) { setScheduling(undefined); setScheduleDay('') } }}>Add place</button></div>}
         <details className="more"><summary>More</summary><div className="more-panel">{place.googleMapsUrl && <a href={place.googleMapsUrl} target="_blank" rel="noreferrer">Google Maps ↗</a>}<button onClick={() => setEditingPlace(place.id)}>Edit place</button><button onClick={() => confirm(`Delete ${place.name} from the planning library?`) && deletePlace(place)}>Delete place</button></div></details>
       </>}
@@ -259,7 +286,7 @@ function Costs({ data, commit, busy }: SectionProps) {
     const expense: Expense = {id:makeId(),amount:Number(fd.get('amount')),currency:String(fd.get('currency')) as Currency,date:String(fd.get('date')),category:String(fd.get('category')),note:String(fd.get('note'))||undefined,rateSetId:activeRates?.id,createdAt:now,updatedAt:now}
     if(await commit(()=>db.expenses.add(expense),'Expense saved.')) { form.reset(); setAddOpen(false) }
   }
-  return <section className="page"><div className="section-heading"><div><p className="eyebrow">Keep the original</p><h2>Trip costs</h2></div><select className="currency-switcher" aria-label="Display currency" value={displayCurrency} onChange={e=>commit(()=>db.metadata.put({key:'displayCurrency',value:e.target.value}))}>{['KES','USD','ZAR'].map(c=><option key={c}>{c}</option>)}</select></div><div className="totals">{totals.map(t=><div key={t.currency}><small>{t.currency}</small><strong>{money(t.amount,t.currency)}</strong></div>)}</div>{!activeRates && <p className="warning">Conversions are off. Review and activate a manual rate set in More. Original totals remain available.</p>}
+  return <section className="page"><div className="section-heading"><div><h2>Trip costs</h2></div><select className="currency-switcher" aria-label="Display currency" value={displayCurrency} onChange={e=>commit(()=>db.metadata.put({key:'displayCurrency',value:e.target.value}))}>{['KES','USD','ZAR'].map(c=><option key={c}>{c}</option>)}</select></div><div className="totals">{totals.map(t=><div key={t.currency}><small>{t.currency}</small><strong>{money(t.amount,t.currency)}</strong></div>)}</div>{!activeRates && <p className="warning">Conversions are off. Review and activate a manual rate set in More. Original totals remain available.</p>}
     <div className="surface-actions"><p>{data.expenses.length} recorded {data.expenses.length === 1 ? 'expense' : 'expenses'}</p><button onClick={() => setAddOpen(true)}>+ Add expense</button></div>
     <div className="stack">{[...data.expenses].sort((a,b)=>b.date.localeCompare(a.date)).map(expense=>{const equivalent=convert(expense,displayCurrency);return <article className="card expense" key={expense.id}><div><strong>{money(expense.amount,expense.currency)}</strong>{equivalent!==undefined&&expense.currency!==displayCurrency&&<small>≈ {money(equivalent,displayCurrency)} · recorded rate</small>}<p>{expense.category} · {expense.date}{expense.note?` · ${expense.note}`:''}</p></div><details className="more"><summary>More</summary><div><button onClick={()=>confirm('Delete this expense?')&&commit(()=>db.expenses.delete(expense.id))}>Delete</button></div></details></article>})}</div>
     <Sheet open={addOpen} title="Add an expense" onClose={() => setAddOpen(false)}><form className="form-card" onSubmit={submit}><div className="two"><label>Amount<input name="amount" type="number" min="0.01" step="0.01" required /></label><label>Currency<select name="currency" defaultValue="KES">{['KES','USD','ZAR'].map(c=><option key={c}>{c}</option>)}</select></label></div><div className="two"><label>Date<input name="date" type="date" required defaultValue={data.trip.startDate}/></label><label>Category<input name="category" required placeholder="Food, transport…" /></label></div><label>Note<input name="note"/></label><div className="actions"><button type="button" className="ghost" onClick={() => setAddOpen(false)}>Cancel</button><button disabled={busy}>Save expense</button></div></form></Sheet>

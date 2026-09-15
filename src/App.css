@@ -220,6 +220,8 @@ button:hover:not(:disabled), .file-button:hover { background: #00575d; }
 .surface-actions p { margin: 0; color: var(--muted); font-size: .8rem; }
 .surface-actions > .date-strip { min-width: 0; flex: 1 1 0; }
 .surface-actions > .add-action { flex: 0 0 auto; white-space: nowrap; }
+.itinerary-add-actions { flex: 0 0 auto; display: flex; gap: 8px; }
+.itinerary-add-actions button { white-space: nowrap; }
 
 .more { margin-top: 8px; }
 .more > summary, .route-details > summary {
@@ -494,6 +496,9 @@ nav button.active { color: #fff; background: var(--turquoise-dark); }
   .cache-status { max-width: 118px; font-size: .64rem; }
   .two, .group-controls { grid-template-columns: 1fr; }
   .schedule-disclosure { grid-template-columns: 1fr; }
+  .itinerary-surface-actions { flex-wrap: wrap; }
+  .itinerary-surface-actions > .date-strip { flex-basis: 100%; }
+  .itinerary-add-actions { width: 100%; justify-content: flex-end; }
   .segmented button { padding-inline: 3px; font-size: .64rem; }
   .wishlist, .expense { display: block; }
   .expense > .more { width: fit-content; }

@@ -67,3 +67,39 @@ describe('checklist form sheet', () => {
     expect(screen.getAllByRole('button', { name: 'Edit' }).length).toBeGreaterThan(0)
   })
 })
+
+describe('parent activity creation', () => {
+  async function openParentActivity() {
+    render(<App />)
+    await screen.findByText('Trip planner')
+    fireEvent.click(screen.getByRole('button', { name: '+ Parent activity' }))
+    return screen.getByRole('dialog', { name: /Add a parent activity/ })
+  }
+
+  it('commits one parent with independent child activities before closing', async () => {
+    await openParentActivity()
+    fireEvent.change(screen.getByLabelText('Parent activity name'), { target: { value: 'Winelands day' } })
+    fireEvent.change(screen.getByLabelText('Child activities, one per line'), { target: { value: 'Stellenbosch\nFranschhoek' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add activity' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    const place = await db.places.filter(candidate => candidate.name === 'Winelands day').first()
+    const parent = place && await db.items.where('placeId').equals(place.id).first()
+    expect(parent?.isActivityGroup).toBe(true)
+    expect(await db.items.where('parentId').equals(parent!.id).count()).toBe(2)
+  })
+
+  it('retains the parent and child drafts when the transaction fails', async () => {
+    await openParentActivity()
+    vi.spyOn(db.items, 'add').mockRejectedValueOnce(new Error('Activity write failed'))
+    fireEvent.change(screen.getByLabelText('Parent activity name'), { target: { value: 'Draft day' } })
+    fireEvent.change(screen.getByLabelText('Child activities, one per line'), { target: { value: 'First stop\nSecond stop' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add activity' }))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Activity write failed'))
+    expect(screen.getByRole('dialog', { name: /Add a parent activity/ })).toBeInTheDocument()
+    expect(screen.getByLabelText('Parent activity name')).toHaveValue('Draft day')
+    expect(screen.getByLabelText('Child activities, one per line')).toHaveValue('First stop\nSecond stop')
+    expect(await db.places.filter(candidate => candidate.name === 'Draft day').count()).toBe(0)
+  })
+})
