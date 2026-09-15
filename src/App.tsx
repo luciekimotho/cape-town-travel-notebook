@@ -41,9 +41,10 @@ function Sheet({ open, title, onClose, children }: { open: boolean; title: strin
   useEffect(() => {
     if (!open) return
     returnFocusRef.current = document.activeElement as HTMLElement | null
-    const background = [...document.querySelectorAll<HTMLElement>('.app-header,.app-main,.bottom-nav,.backbar,.detail-main')]
-    background.forEach(element => element.setAttribute('inert', ''))
     const panel = panelRef.current
+    const background = [...document.querySelectorAll<HTMLElement>('.app-header,.app-main,.bottom-nav,.backbar,.detail-main')]
+      .filter(element => !panel || !element.contains(panel))
+    background.forEach(element => element.setAttribute('inert', ''))
     panel?.focus()
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); onCloseRef.current(); return }

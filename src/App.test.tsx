@@ -225,6 +225,7 @@ describe('remaining production surfaces', () => {
     expect(screen.queryByText('Sneakers', { selector:'strong' })).not.toBeVisible()
     fireEvent.click(screen.getByText('Shopping', { selector:'strong' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add reminder' }))
+    expect(screen.getByRole('dialog', { name:'Add reminder' }).closest('[inert]')).toBeNull()
     fireEvent.change(screen.getByLabelText('Reminder *'), { target: { value: 'Confirm museum day' } })
     expect(screen.getByLabelText('Category')).toHaveDisplayValue('Planning')
     fireEvent.change(screen.getByLabelText('Category'), { target: { value:'Documents' } })
@@ -256,21 +257,25 @@ describe('form persistence and cancellation', () => {
     await renderApp()
 
     fireEvent.click(screen.getByRole('button', { name:'Add activity' }))
+    expect(screen.getByRole('dialog').closest('[inert]')).toBeNull()
     fireEvent.change(screen.getByLabelText('Name *'), { target:{ value:'Cancelled itinerary activity' } })
     fireEvent.click(screen.getByRole('button', { name:'Close Add activity' }))
 
     fireEvent.click(screen.getByRole('button', { name:'Places' }))
     fireEvent.click(screen.getByRole('button', { name:'Add place' }))
+    expect(screen.getByRole('dialog').closest('[inert]')).toBeNull()
     fireEvent.change(screen.getByLabelText('Name *'), { target:{ value:'Cancelled place' } })
     fireEvent.click(screen.getByRole('button', { name:'Close Add activity' }))
 
     fireEvent.click(screen.getByRole('button', { name:'Checklist' }))
     fireEvent.click(screen.getByRole('button', { name:'Add reminder' }))
+    expect(screen.getByRole('dialog').closest('[inert]')).toBeNull()
     fireEvent.change(screen.getByLabelText('Reminder *'), { target:{ value:'Cancelled reminder' } })
     fireEvent.click(screen.getByRole('button', { name:'Cancel' }))
 
     fireEvent.click(screen.getByRole('button', { name:'Costs' }))
     fireEvent.click(screen.getByRole('button', { name:'Add expense' }))
+    expect(screen.getByRole('dialog').closest('[inert]')).toBeNull()
     fireEvent.change(screen.getByLabelText('Amount *'), { target:{ value:'900' } })
     fireEvent.change(screen.getByLabelText('Category'), { target:{ value:'Cancelled cost' } })
     fireEvent.click(screen.getByRole('button', { name:'Close Add expense' }))
