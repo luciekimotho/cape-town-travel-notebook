@@ -365,6 +365,7 @@ button:hover:not(:disabled), .file-button:hover { background: var(--turquoise-da
 .totals small { font-weight: 900; letter-spacing: .1em; }
 .totals strong { margin-top: 4px; font-family: var(--display); font-size: .86rem; }
 .currency-switcher { width: auto; color: #fff; background: var(--cobalt); border: 2px solid var(--ink); font-weight: 900; }
+.currency-switcher, .form-card select { min-height: 44px; padding-block: 10px; }
 .expense { display: flex; justify-content: space-between; border-left: 5px solid var(--cobalt); }
 .expense > button { background: transparent; box-shadow: none; }
 
