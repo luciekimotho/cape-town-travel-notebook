@@ -353,6 +353,32 @@ svg { display: block; }
 .backup-export { color: var(--paper-card); background: var(--teal); border: 0; }
 .backup-restore { position: relative; color: var(--teal); background: var(--paper-deep); border: 1px solid #dfd0b3; cursor: pointer; }
 .backup-restore input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.access-panel { position: relative; }
+.signed-in-email { overflow-wrap: anywhere; }
+.access-form { margin-top: 12px; }
+.access-person { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 13px; padding: 12px; background: var(--paper-deep); border: 1px solid var(--line); border-radius: 11px; }
+.access-person span { display: grid; gap: 3px; min-width: 0; }
+.access-person small { overflow-wrap: anywhere; color: var(--muted); }
+.sharing-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.compact-action { min-height: 44px; padding: 8px 12px; }
+.sign-out-action { margin-top: 14px; }
+
+.cloud-entry { min-height: 100dvh; padding: 0 18px 40px; background: var(--paper); }
+.cloud-facades { display: grid; grid-template-columns: repeat(5, 1fr); height: 118px; margin: 0 -18px 38px; overflow: hidden; border-bottom: 4px solid var(--ink); }
+.cloud-facades i { position: relative; border-right: 2px solid rgba(40,36,31,.35); }
+.cloud-facades i::after { content: ""; position: absolute; left: 50%; bottom: 0; width: 36%; height: 43%; transform: translateX(-50%); background: rgba(255,248,230,.72); border: 2px solid rgba(40,36,31,.48); border-bottom: 0; border-radius: 16px 16px 0 0; }
+.cloud-facades i:nth-child(1) { background: var(--pink); }
+.cloud-facades i:nth-child(2) { background: var(--mustard); }
+.cloud-facades i:nth-child(3) { background: var(--teal); }
+.cloud-facades i:nth-child(4) { background: var(--cobalt); }
+.cloud-facades i:nth-child(5) { background: var(--leaf); }
+.cloud-entry-card { width: min(100%, 430px); margin: 0 auto; padding: 24px 20px; color: var(--ink); background: var(--paper-card); border: 2px solid var(--ink); border-radius: 16px 16px 14px 14px; box-shadow: 5px 6px 0 rgba(40,36,31,.12); }
+.cloud-entry-card .stamp-mark { display: grid; place-items: center; width: 52px; height: 52px; margin: -48px 0 16px auto; color: var(--paper-card); background: var(--teal); border: 3px double var(--paper-card); border-radius: 50%; transform: rotate(7deg); font: 800 16px/1 Georgia,serif; }
+.cloud-entry-card h1 { max-width: 320px; margin: 0 0 10px; font: 700 clamp(25px,8vw,34px)/1.05 Georgia,serif; }
+.cloud-entry-card > p { margin: 0 0 18px; color: var(--muted); line-height: 1.55; }
+.cloud-entry-form { display: grid; gap: 14px; }
+.cloud-entry-form .save, .cloud-create { width: 100%; min-height: 48px; }
+.cloud-sign-out { display: block; margin: 18px auto 0; }
 .message { position: sticky; z-index: 80; top: 8px; display: flex; align-items: center; justify-content: space-between; margin: 8px 16px -4px; padding: 10px 12px; color: var(--leaf-dark); background: #e6f1dc; border: 2px solid var(--leaf); border-radius: 12px; font-size: 12px; font-weight: 700; }
 .message.error { color: #792436; background: #ffe6e9; border-color: var(--error); }
 .message button { width: 44px; min-width: 44px; height: 44px; margin: -8px -8px -8px 8px; color: inherit; background: transparent; border: 0; font-size: 20px; }

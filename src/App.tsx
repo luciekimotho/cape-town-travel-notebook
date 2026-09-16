@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { createBackup, parseBackup, restoreBackup } from './backup'
-import { createItineraryPlace, db, deleteItineraryGroup, deleteItineraryItem, initializeDatabase, loadData, makeId, materializeTemplate, saveItineraryDetails, scheduleCandidatePlace } from './db'
+import { createContext, useContext, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { createBackup, parseBackup } from './backup'
+import { makeId } from './db'
+import { localNotebookStore, type NotebookStore } from './notebookStore'
 import { compressPhoto } from './photo'
 
 import { artKindFor, colorForKind, EmptyDayArt, LineIcon, MarkerIcon, PlaceScene, TravelStamp } from './Artwork'
@@ -22,6 +23,19 @@ const formatTripRange = (start: string, end: string) => {
 const money = (amount: number, currency: Currency) => new Intl.NumberFormat('en-KE', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount)
 const currencies: Currency[] = ['KES', 'USD', 'ZAR']
 interface SectionProps { data: AppData; commit: (fn: () => Promise<unknown>, success?: string) => Promise<boolean>; busy: boolean }
+export interface CloudAccountControls {
+  email: string
+  role: 'owner' | 'editor'
+  pendingEmail: string | null
+  claimedEmail: string | null
+  claimedUserId: string | null
+  share(email: string): Promise<void>
+  revokePending(): Promise<void>
+  removeEditor(userId: string): Promise<void>
+  signOut(): Promise<void>
+}
+const NotebookStoreContext = createContext<NotebookStore>(localNotebookStore)
+const useNotebookStore = () => useContext(NotebookStoreContext)
 
 export function TransientNotice({ message, version, onDismiss, tone = 'status' }: { message: string; version: number; onDismiss: () => void; tone?: 'status' | 'error' }) {
   const dismissRef = useRef(onDismiss)
@@ -79,6 +93,15 @@ function PhotoImage({ photo, alt, className }: { photo: PhotoEntry; alt: string;
 }
 
 export default function App() {
+  return <NotebookApplication store={localNotebookStore}/>
+}
+
+export function NotebookApplication({ store, account }: { store: NotebookStore; account?: CloudAccountControls }) {
+  return <NotebookStoreContext.Provider value={store}><NotebookApp account={account}/></NotebookStoreContext.Provider>
+}
+
+function NotebookApp({ account }: { account?: CloudAccountControls }) {
+  const store = useNotebookStore()
   const [data, setData] = useState<AppData>()
   const [tab, setTab] = useState<Tab>('itinerary')
   const [detail, setDetail] = useState<DetailRoute>()
@@ -90,16 +113,21 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [restoreCandidate, setRestoreCandidate] = useState<AppData>()
   const detailReturnRef = useRef<HTMLElement | null>(null)
-  const refresh = async () => setData(await loadData())
+  const refresh = async () => setData(await store.load())
 
   const showError = (message: string) => { setError(message); setErrorVersion(version => version + 1) }
-  useEffect(() => { initializeDatabase().then(refresh).catch(err => showError(String(err))) }, [])
+  useEffect(() => { store.initialize().then(refresh).catch(err => showError(String(err))) }, [store])
   const showNotice = (message: string) => { setNotice(message); setNoticeVersion(version => version + 1) }
   const commit = async (operation: () => Promise<unknown>, success?: string) => {
     setBusy(true); setError(''); setNotice('')
     try {
-      await operation()
-      await refresh()
+      const result = await operation()
+      if (result && typeof result === 'object' && 'notebook' in result) {
+        const saved = result as { notebook:AppData; warning?:string }
+        setData(saved.notebook)
+        if (saved.warning) showError(saved.warning)
+      } else if (result && typeof result === 'object' && 'trip' in result) setData(result as AppData)
+      else await refresh()
       if (success) showNotice(success)
       return true
     } catch (err) {
@@ -151,8 +179,8 @@ export default function App() {
         {tab === 'costs' && <Costs data={data} commit={commit} busy={busy} onOpenSettings={() => setSettingsOpen(true)}/>}
       </main>}
     {!detail && <BottomNav tab={tab} onChange={setTab}/>}
-    <Sheet open={settingsOpen} title="Settings" onClose={() => setSettingsOpen(false)}><Settings data={data} commit={commit} busy={busy} onExport={exportNotebook} onRestore={selectRestore}/></Sheet>
-    {restoreCandidate && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="restore-title"><h2 id="restore-title">Replace this notebook?</h2><p>This atomically replaces all current trip data and photos. Export a backup first if you may need to undo it.</p><div className="actions"><button className="ghost" onClick={() => setRestoreCandidate(undefined)}>Cancel</button><button className="danger" onClick={async () => { const candidate = restoreCandidate; setRestoreCandidate(undefined); await commit(() => restoreBackup(candidate), 'Notebook restored.') }}>Replace notebook</button></div></section></div>}
+    <Sheet open={settingsOpen} title="Settings" onClose={() => setSettingsOpen(false)}><Settings data={data} commit={commit} busy={busy} onExport={exportNotebook} onRestore={selectRestore} account={account}/></Sheet>
+    {restoreCandidate && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="restore-title"><h2 id="restore-title">Replace this notebook?</h2><p>This atomically replaces all current trip data and photos. Export a backup first if you may need to undo it.</p><div className="actions"><button className="ghost" onClick={() => setRestoreCandidate(undefined)}>Cancel</button><button className="danger" onClick={async () => { const candidate = restoreCandidate; if(await commit(() => store.replaceAll(candidate), 'Notebook restored.'))setRestoreCandidate(undefined) }}>Replace notebook</button></div></section></div>}
   </div>
 }
 
@@ -227,6 +255,7 @@ function ActivityForm({ data, item, place, expense, defaultDayId, fixedTemplate,
 }
 
 function Itinerary({ data, commit, busy, onOpen }: SectionProps & { onOpen: (itemId: string, parentId?: string) => void }) {
+  const store = useNotebookStore()
   const [openDay, setOpenDay] = useState(data.days.find(day => !day.outOfRange)?.id ?? data.days[0]?.id)
   const [editorOpen, setEditorOpen] = useState(false)
   const day = data.days.find(candidate => candidate.id === openDay)
@@ -237,7 +266,7 @@ function Itinerary({ data, commit, busy, onOpen }: SectionProps & { onOpen: (ite
     const now = timestamp()
     const place: Place = { id:makeId(), name:values.name, address:values.address, googleMapsUrl:values.googleMapsUrl, notes:values.notes, wantToVisit:false, createdAt:now, updatedAt:now }
     const item: ItineraryItem = { id:makeId(), dayId:values.dayId, placeId:place.id, parentId:values.parentId, time:values.time, bookingStatus:values.bookingStatus, notes:values.notes, visited:false, position:Date.now(), createdAt:now, updatedAt:now }
-    const saved = await commit(() => createItineraryPlace(place, item, values.cost))
+    const saved = await commit(() => store.createItineraryPlace(place, item, values.cost))
     if (saved) { setOpenDay(values.dayId); setEditorOpen(false) }
     return saved
   }
@@ -270,6 +299,7 @@ function RouteRow({ item, data, compact, onOpen }: { item: ItineraryItem; data: 
 }
 
 function ActivityDetail({ route, data, commit, busy, onBack, onOpenChild }: { route: DetailRoute; data: AppData; commit: SectionProps['commit']; busy: boolean; onBack: () => void; onOpenChild: (id: string) => void }) {
+  const store = useNotebookStore()
   const item = data.items.find(candidate => candidate.id === route.itemId)
   const place = item && data.places.find(candidate => candidate.id === item.placeId)
   const day = item && data.days.find(candidate => candidate.id === item.dayId)
@@ -287,24 +317,17 @@ function ActivityDetail({ route, data, commit, busy, onBack, onOpenChild }: { ro
   const toggleStamp = async () => {
     if (stamp) {
       if (photo && !confirm('Undo this stamp and permanently delete its photo?')) return
-      const saved = await commit(() => db.transaction('rw', [db.items,db.stamps,db.photos], async () => {
-        await db.photos.where('stampId').equals(stamp.id).delete()
-        await db.stamps.delete(stamp.id)
-        await db.items.update(item.id,{visited:false,updatedAt:timestamp()})
-      }))
+      const saved = await commit(() => store.undoStamp(stamp.id, item.id))
       if (saved) setJustStamped(false)
       return
     }
-    const saved = await commit(() => db.transaction('rw', [db.items,db.stamps], async () => {
-      await db.stamps.add({id:makeId(),itineraryItemId:item.id,placeName:place.name,visitDate:day.date,detached:false,createdAt:timestamp()})
-      await db.items.update(item.id,{visited:true,updatedAt:timestamp()})
-    }))
+    const saved = await commit(() => store.createStamp({id:makeId(),itineraryItemId:item.id,placeName:place.name,visitDate:day.date,detached:false,createdAt:timestamp()}, item.id))
     if (saved) setJustStamped(true)
   }
   const save = async (values: EntryValues) => {
     if (!values.dayId) return commit(() => Promise.reject(new Error('Choose a day for this activity.')))
     if (expense && !values.cost && !confirm('Remove this recorded expense?')) return false
-    const saved = await commit(() => saveItineraryDetails(item.id, {
+    const saved = await commit(() => store.saveItineraryDetails(item.id, {
       name:values.name, dayId:values.dayId, parentId:values.parentId, time:values.time, bookingStatus:values.bookingStatus,
       notes:values.notes, address:values.address, googleMapsUrl:values.googleMapsUrl,
     }, values.cost ?? (expense ? null : undefined)))
@@ -314,7 +337,7 @@ function ActivityDetail({ route, data, commit, busy, onBack, onOpenChild }: { ro
   const remove = async () => {
     const message = children.length ? `Delete ${place.name}? Expenses remain in Costs; stamped moments and photos become detached.` : `Delete ${place.name}? Its expense remains in Costs and its stamped moment becomes detached.`
     if (!confirm(message)) return
-    const saved = await commit(() => children.length ? deleteItineraryGroup(item.id) : deleteItineraryItem(item.id))
+    const saved = await commit(() => children.length ? store.deleteItineraryGroup(item.id) : store.deleteItineraryItem(item.id))
     if (saved) { setEditorOpen(false); onBack() }
   }
   return <>
@@ -334,6 +357,7 @@ function ActivityDetail({ route, data, commit, busy, onBack, onOpenChild }: { ro
 }
 
 function PhotoEditor({ open, stamp, photo, busy, commit, onClose }: { open: boolean; stamp: Stamp; photo?: PhotoEntry; busy: boolean; commit: SectionProps['commit']; onClose: () => void }) {
+  const store = useNotebookStore()
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const form = event.currentTarget
@@ -344,15 +368,16 @@ function PhotoEditor({ open, stamp, photo, busy, commit, onClose }: { open: bool
     try {
       const compressed = file ? await compressPhoto(file) : undefined
       const now = timestamp()
-      const saved = await commit(() => db.photos.put({ id:photo?.id ?? makeId(), stampId:stamp.id, caption, mimeType:compressed?.blob.type ?? photo!.mimeType, width:compressed?.width ?? photo!.width, height:compressed?.height ?? photo!.height, size:compressed?.blob.size ?? photo!.size, blob:compressed?.blob ?? photo!.blob, createdAt:photo?.createdAt ?? now, updatedAt:now }))
+      const saved = await commit(() => store.savePhoto({ id:photo?.id ?? makeId(), stampId:stamp.id, caption, mimeType:compressed?.blob.type ?? photo!.mimeType, width:compressed?.width ?? photo!.width, height:compressed?.height ?? photo!.height, size:compressed?.blob.size ?? photo!.size, blob:compressed?.blob ?? photo!.blob, createdAt:photo?.createdAt ?? now, updatedAt:now }))
       if (saved) onClose()
     } catch (error) { await commit(() => Promise.reject(error)) }
   }
-  const remove = photo ? () => { if (confirm('Delete this photo permanently? The stamp will remain.')) commit(() => db.photos.delete(photo.id)).then(saved => saved && onClose()) } : undefined
+  const remove = photo ? () => { if (confirm('Delete this photo permanently? The stamp will remain.')) commit(() => store.deletePhoto(photo)).then(saved => saved && onClose()) } : undefined
   return <Sheet open={open} title="Moment" onClose={onClose}><form className="form-card" onSubmit={save}><label className="field">Photo<input name="photo" type="file" accept="image/jpeg,image/png,image/webp" required={!photo}/></label><p className="form-hint">JPEG, PNG or WebP · max 1600px</p><label className="field">Caption<input name="caption" defaultValue={photo?.caption}/></label><FormActions label="photo" busy={busy} onDelete={remove}/></form></Sheet>
 }
 
 function Checklist({ data, commit, busy }: SectionProps) {
+  const store = useNotebookStore()
   const categories = ['Planning','Documents','Shopping'] as const
   const [editing, setEditing] = useState<ChecklistItem>()
   const [editorOpen, setEditorOpen] = useState(false)
@@ -360,17 +385,18 @@ function Checklist({ data, commit, busy }: SectionProps) {
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const form=event.currentTarget; const fd=new FormData(form); const now=timestamp()
     const item: ChecklistItem = { id:editing?.id ?? makeId(), title:String(fd.get('title')).trim(), category:String(fd.get('category')).trim(), dueDate:String(fd.get('dueDate'))||undefined, note:String(fd.get('note')).trim()||undefined, completed:editing?.completed ?? false, createdAt:editing?.createdAt ?? now, updatedAt:now }
-    if (await commit(() => db.checklist.put(item))) close()
+    if (await commit(() => store.saveChecklist(item))) close()
   }
-  const remove = () => editing && confirm('Delete this reminder?') && commit(() => db.checklist.delete(editing.id)).then(saved => saved && close())
+  const remove = () => editing && confirm('Delete this reminder?') && commit(() => store.deleteChecklist(editing.id)).then(saved => saved && close())
   const items=[...data.checklist].sort((a,b)=>Number(a.completed)-Number(b.completed))
   const categoryFor = (item?: ChecklistItem) => item && categories.includes(item.category as typeof categories[number]) ? item.category : 'Planning'
-  return <section className="page"><div className="section-row"><h2>Checklist</h2><button className="icon-button add-button" aria-label="Add reminder" onClick={() => {setEditing(undefined);setEditorOpen(true)}}>+</button></div>{categories.map(category=>{const categoryItems=items.filter(item=>categoryFor(item)===category);return <details className="checklist-section" key={category} open><summary><strong>{category}</strong><span>{categoryItems.filter(item=>item.completed).length}/{categoryItems.length}</span></summary><div className="plain-list">{categoryItems.map(item=><div className={`plain-row checklist-row ${item.completed?'checked':''}`} key={item.id}><button className="check-toggle" aria-label={`${item.completed?'Uncheck':'Complete'} ${item.title}`} aria-pressed={item.completed} onClick={()=>commit(()=>db.checklist.update(item.id,{completed:!item.completed,updatedAt:timestamp()}))}><span className="check-box">{item.completed?'✓':''}</span></button><button className="copy row-open" onClick={()=>{setEditing(item);setEditorOpen(true)}}><strong>{item.title}</strong>{item.dueDate&&<small>{formatDate(item.dueDate)}</small>}</button></div>)}</div></details>})}
+  return <section className="page"><div className="section-row"><h2>Checklist</h2><button className="icon-button add-button" aria-label="Add reminder" onClick={() => {setEditing(undefined);setEditorOpen(true)}}>+</button></div>{categories.map(category=>{const categoryItems=items.filter(item=>categoryFor(item)===category);return <details className="checklist-section" key={category} open><summary><strong>{category}</strong><span>{categoryItems.filter(item=>item.completed).length}/{categoryItems.length}</span></summary><div className="plain-list">{categoryItems.map(item=><div className={`plain-row checklist-row ${item.completed?'checked':''}`} key={item.id}><button className="check-toggle" aria-label={`${item.completed?'Uncheck':'Complete'} ${item.title}`} aria-pressed={item.completed} onClick={()=>commit(()=>store.setChecklistCompleted(item.id,!item.completed,timestamp()))}><span className="check-box">{item.completed?'✓':''}</span></button><button className="copy row-open" onClick={()=>{setEditing(item);setEditorOpen(true)}}><strong>{item.title}</strong>{item.dueDate&&<small>{formatDate(item.dueDate)}</small>}</button></div>)}</div></details>})}
     <Sheet open={editorOpen} title={editing?'Edit reminder':'Add reminder'} onClose={close}><form className="form-card" onSubmit={submit}><label className="field">Reminder *<input name="title" required defaultValue={editing?.title}/></label><div className="fields-two"><label className="field">Category<select name="category" defaultValue={categoryFor(editing)}>{categories.map(category=><option key={category}>{category}</option>)}</select></label><label className="field">Due date<input name="dueDate" type="date" defaultValue={editing?.dueDate}/></label></div><label className="field">Note<textarea name="note" defaultValue={editing?.note}/></label><div className="reminder-actions">{editing&&<button type="button" className="danger" onClick={remove} disabled={busy}>Delete</button>}<button type="button" className="ghost" onClick={close}>Cancel</button><button type="submit" className="save" disabled={busy}>Save reminder</button></div></form></Sheet>
   </section>
 }
 
 function Places({ data, commit, busy }: SectionProps) {
+  const store = useNotebookStore()
   const [placeEditor, setPlaceEditor] = useState<Place>()
   const [adding, setAdding] = useState(false)
   const [template, setTemplate] = useState<ActivityTemplate>()
@@ -385,36 +411,36 @@ function Places({ data, commit, busy }: SectionProps) {
       if (values.dayId) {
         const place: Place={id:makeId(),name:values.name,address:values.address,googleMapsUrl:values.googleMapsUrl,notes:values.notes,wantToVisit:false,createdAt:now,updatedAt:now}
         const item: ItineraryItem={id:makeId(),dayId:values.dayId,placeId:place.id,parentId:values.parentId,time:values.time,bookingStatus:values.bookingStatus,notes:values.notes,visited:false,position:Date.now(),createdAt:now,updatedAt:now}
-        const saved=await commit(()=>createItineraryPlace(place,item,values.cost));if(saved)setAdding(false);return saved
+        const saved=await commit(()=>store.createItineraryPlace(place,item,values.cost));if(saved)setAdding(false);return saved
       }
-      const saved=await commit(()=>db.places.add({id:makeId(),name:values.name,address:values.address,googleMapsUrl:values.googleMapsUrl,notes:values.notes,wantToVisit:true,createdAt:now,updatedAt:now}));if(saved)setAdding(false);return saved
+      const saved=await commit(()=>store.addPlace({id:makeId(),name:values.name,address:values.address,googleMapsUrl:values.googleMapsUrl,notes:values.notes,wantToVisit:true,createdAt:now,updatedAt:now}));if(saved)setAdding(false);return saved
     }
     if (values.dayId) {
       const dayId = values.dayId
       const currentPlace = placeEditor
-      const saved=await commit(()=>scheduleCandidatePlace(currentPlace.id,dayId,values.cost,{name:values.name,address:values.address,googleMapsUrl:values.googleMapsUrl,notes:values.notes},values));if(saved)setPlaceEditor(undefined);return saved
+      const saved=await commit(()=>store.scheduleCandidatePlace(currentPlace.id,dayId,values.cost,{name:values.name,address:values.address,googleMapsUrl:values.googleMapsUrl,notes:values.notes},values));if(saved)setPlaceEditor(undefined);return saved
     }
-    const saved=await commit(()=>db.places.update(placeEditor.id,{name:values.name,address:values.address,googleMapsUrl:values.googleMapsUrl,notes:values.notes,updatedAt:now}));if(saved)setPlaceEditor(undefined);return saved
+    const saved=await commit(()=>store.updatePlace(placeEditor.id,{name:values.name,address:values.address,googleMapsUrl:values.googleMapsUrl,notes:values.notes,updatedAt:now}));if(saved)setPlaceEditor(undefined);return saved
   }
   const deletePlace = () => {
     const current = placeEditor
     if (!current || !confirm(`Delete ${current.name}?`)) return
-    commit(()=>db.transaction('rw',[db.places,db.items],async()=>{if(await db.items.where('placeId').equals(current.id).count())throw new Error('Remove this place from the itinerary before deleting it.');await db.places.delete(current.id)})).then(saved=>saved&&setPlaceEditor(undefined))
+    commit(()=>store.deletePlace(current.id)).then(saved=>saved&&setPlaceEditor(undefined))
   }
   const scheduleTemplate = async (values: EntryValues) => {
     if (!template) return false
     const currentTemplate = template
     if (!values.dayId) {
-      const saved=await commit(()=>db.activityTemplates.update(currentTemplate.id,{name:values.name,description:values.notes??'',updatedAt:timestamp()}))
+      const saved=await commit(()=>store.updateTemplate(currentTemplate.id,{name:values.name,description:values.notes??'',updatedAt:timestamp()}))
       if(saved)setTemplate(undefined)
       return saved
     }
     const dayId = values.dayId
-    const saved=await commit(()=>materializeTemplate(currentTemplate,dayId,values.cost,{name:values.name,time:values.time,bookingStatus:values.bookingStatus,address:values.address,googleMapsUrl:values.googleMapsUrl,notes:values.notes,parentId:values.parentId}))
+    const saved=await commit(()=>store.materializeTemplate(currentTemplate,dayId,values.cost,{name:values.name,time:values.time,bookingStatus:values.bookingStatus,address:values.address,googleMapsUrl:values.googleMapsUrl,notes:values.notes,parentId:values.parentId}))
     if(saved)setTemplate(undefined)
     return saved
   }
-  const deleteTemplate=()=>{const current=template;if(!current||!confirm(`Delete ${current.name} from Activities? Existing itinerary items remain.`))return;commit(()=>db.activityTemplates.delete(current.id)).then(saved=>saved&&setTemplate(undefined))}
+  const deleteTemplate=()=>{const current=template;if(!current||!confirm(`Delete ${current.name} from Activities? Existing itinerary items remain.`))return;commit(()=>store.deleteTemplate(current.id)).then(saved=>saved&&setTemplate(undefined))}
   return <section className="page"><div className="section-row"><h2>Places <span className="count">{places.length}</span></h2><button className="icon-button add-button" aria-label="Add place" onClick={()=>setAdding(true)}>+</button></div>
     <p className="list-label">Activities</p>{data.activityTemplates.map(entry=><button className="activity-card place-entry" key={entry.id} onClick={()=>setTemplate(entry)}><span className="thumb"><PlaceScene name={entry.name}/></span><span className="card-copy"><h3>{entry.name}</h3><small>{entry.stops.length} {entry.stops.length===1?'activity':'stops'}</small></span><span className="chevron">›</span></button>)}
     <p className="list-label">Places</p>{places.map(place=><button className="activity-card place-entry" key={place.id} onClick={()=>setPlaceEditor(place)}><span className="thumb"><PlaceScene name={place.name}/></span><span className="card-copy"><h3>{place.name}</h3>{place.notes&&<small>{place.notes}</small>}</span><span className="chevron">›</span></button>)}
@@ -425,10 +451,11 @@ function Places({ data, commit, busy }: SectionProps) {
 }
 
 function Moments({ data, commit, busy, onOpen }: SectionProps & { onOpen: (itemId: string) => void }) {
+  const store = useNotebookStore()
   const [editing, setEditing]=useState<Stamp>()
   const [photoStamp, setPhotoStamp]=useState<Stamp>()
   const photoFor=(stampId:string)=>data.photos.find(photo=>photo.stampId===stampId)
-  const removeDetached=async(stamp:Stamp)=>{if(!confirm('Delete this memory and its photo permanently?'))return;const saved=await commit(()=>db.transaction('rw',[db.stamps,db.photos],async()=>{await db.photos.where('stampId').equals(stamp.id).delete();await db.stamps.delete(stamp.id)}));if(saved)setEditing(undefined)}
+  const removeDetached=async(stamp:Stamp)=>{if(!confirm('Delete this memory and its photo permanently?'))return;const saved=await commit(()=>store.deleteDetachedMemory(stamp.id));if(saved)setEditing(undefined)}
   return <section className="page"><div className="section-row"><h2>Moments <span className="count">{data.stamps.length}</span></h2></div>{data.stamps.length?<div className="postcards">{data.stamps.map(stamp=>{const photo=photoFor(stamp.id);const item=stamp.itineraryItemId&&data.items.find(candidate=>candidate.id===stamp.itineraryItemId);return <button className="postcard" key={stamp.id} onClick={()=>item?onOpen(item.id):setEditing(stamp)}><span className="postcard-visual">{photo?<PhotoImage photo={photo} alt={photo.caption||stamp.placeName}/>:<PlaceScene name={stamp.placeName}/>}<span className="postcard-stamp"><TravelStamp name={stamp.placeName} date={stamp.visitDate}/></span></span><span className="postcard-name">{stamp.placeName}</span><small>{photo?.caption||formatDate(stamp.visitDate,false)}</small></button>})}</div>:<p className="empty-compact">Stamp an activity to start your collection.</p>}
     {editing&&<Sheet open title="Moment" onClose={()=>setEditing(undefined)}><div className="detached-memory">{photoFor(editing.id)?<PhotoImage photo={photoFor(editing.id)!} alt={photoFor(editing.id)!.caption||editing.placeName} className="memory-image"/>:<PlaceScene name={editing.placeName} className="detached-scene"/>}<TravelStamp name={editing.placeName} date={editing.visitDate} className="detached-stamp"/><h3>{editing.placeName}</h3><p>{formatDate(editing.visitDate)}</p><button onClick={()=>{setPhotoStamp(editing);setEditing(undefined)}}>{photoFor(editing.id)?'Edit photo':'Add photo'}</button><button className="danger" onClick={()=>removeDetached(editing)}>Delete memory</button></div></Sheet>}
     {photoStamp&&<PhotoEditor open stamp={photoStamp} photo={photoFor(photoStamp.id)} busy={busy} commit={commit} onClose={()=>setPhotoStamp(undefined)}/>}
@@ -436,6 +463,7 @@ function Moments({ data, commit, busy, onOpen }: SectionProps & { onOpen: (itemI
 }
 
 function Costs({ data, commit, busy, onOpenSettings }: SectionProps & { onOpenSettings: () => void }) {
+  const store = useNotebookStore()
   const [editingId,setEditingId]=useState<string>()
   const [adding,setAdding]=useState(false)
   const editing=data.expenses.find(expense=>expense.id===editingId)
@@ -444,10 +472,10 @@ function Costs({ data, commit, busy, onOpenSettings }: SectionProps & { onOpenSe
   const totals=currencies.map(currency=>({currency,amount:data.expenses.filter(expense=>expense.currency===currency).reduce((sum,expense)=>sum+expense.amount,0)}))
   const convert=(expense:Expense,target:Currency)=>{const rates=data.rateSets.find(rate=>rate.id===expense.rateSetId);if(!rates)return;const keys:Record<Currency,keyof RateSet>={KES:'kesPerKes',USD:'kesPerUsd',ZAR:'kesPerZar'};return expense.amount*Number(rates[keys[expense.currency]])/Number(rates[keys[target]])}
   const close=()=>{setEditingId(undefined);setAdding(false)}
-  const submit=async(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();const form=event.currentTarget;const fd=new FormData(form);const now=timestamp();const expense:Expense={id:editing?.id??makeId(),amount:Number(fd.get('amount')),currency:String(fd.get('currency'))as Currency,date:editing?.itineraryItemId?editing.date:String(fd.get('date')),category:String(fd.get('category')).trim(),note:String(fd.get('note')).trim()||undefined,itineraryItemId:editing?.itineraryItemId,rateSetId:editing?.rateSetId??activeRates?.id,createdAt:editing?.createdAt??now,updatedAt:now};if(await commit(()=>db.expenses.put(expense)))close()}
-  const remove=()=>editing&&confirm(editing.itineraryItemId?'Delete this expense? Its activity will no longer show a cost.':'Delete this expense?')&&commit(()=>db.expenses.delete(editing.id)).then(saved=>saved&&close())
+  const submit=async(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();const form=event.currentTarget;const fd=new FormData(form);const now=timestamp();const expense:Expense={id:editing?.id??makeId(),amount:Number(fd.get('amount')),currency:String(fd.get('currency'))as Currency,date:editing?.itineraryItemId?editing.date:String(fd.get('date')),category:String(fd.get('category')).trim(),note:String(fd.get('note')).trim()||undefined,itineraryItemId:editing?.itineraryItemId,rateSetId:editing?.rateSetId??activeRates?.id,createdAt:editing?.createdAt??now,updatedAt:now};if(await commit(()=>store.saveExpense(expense)))close()}
+  const remove=()=>editing&&confirm(editing.itineraryItemId?'Delete this expense? Its activity will no longer show a cost.':'Delete this expense?')&&commit(()=>store.deleteExpense(editing.id)).then(saved=>saved&&close())
   return <section className="page"><div className="section-row"><h2>Costs</h2><button className="icon-button add-button" aria-label="Add expense" onClick={()=>setAdding(true)}>+</button></div>
-    <div className="currency-tabs" role="group" aria-label="Display currency">{currencies.map(currency=><button key={currency} aria-pressed={display===currency} onClick={()=>commit(()=>db.metadata.put({key:'displayCurrency',value:currency}))}>{currency}</button>)}</div>
+    <div className="currency-tabs" role="group" aria-label="Display currency">{currencies.map(currency=><button key={currency} aria-pressed={display===currency} onClick={()=>commit(()=>store.setDisplayCurrency(currency))}>{currency}</button>)}</div>
     <div className="total-card"><p>Original totals</p><strong>{money(totals.find(total=>total.currency===display)!.amount,display)}</strong><div className="original-totals">{totals.filter(total=>total.currency!==display).map(total=><small key={total.currency}>{money(total.amount,total.currency)}</small>)}</div></div>
     {!activeRates&&<div className="warning compact-warning"><span>Conversions off</span><button className="text-action" onClick={onOpenSettings}>Settings</button></div>}
     <div className="plain-list">{[...data.expenses].sort((a,b)=>b.date.localeCompare(a.date)).map(expense=>{const equivalent=convert(expense,display);const linkedItem=data.items.find(item=>item.id===expense.itineraryItemId);const linkedPlace=linkedItem&&data.places.find(place=>place.id===linkedItem.placeId);return <button className="plain-row" key={expense.id} onClick={()=>setEditingId(expense.id)}><LineIcon name="costs"/><span className="copy"><strong>{linkedPlace?.name??expense.category}</strong><small>{equivalent!==undefined&&expense.currency!==display?`≈ ${money(equivalent,display)} · recorded rate`:expense.note||formatDate(expense.date)}</small></span><span className="amount">{money(expense.amount,expense.currency)}</span></button>})}</div>
@@ -455,11 +483,31 @@ function Costs({ data, commit, busy, onOpenSettings }: SectionProps & { onOpenSe
   </section>
 }
 
-function Settings({ data, commit, busy, onExport, onRestore }: SectionProps & { onExport: () => void; onRestore: (file: File) => void }) {
+function Settings({ data, commit, busy, onExport, onRestore, account }: SectionProps & { onExport: () => void; onRestore: (file: File) => void; account?: CloudAccountControls }) {
+  const store = useNotebookStore()
   const active=data.rateSets.find(rate=>rate.active)
   const example=data.rateSets[0]
+  const canRestore=store.kind==='local'||account?.role==='owner'
   return <div className="settings-stack">
-    <section className="settings-panel"><div className="settings-panel-heading"><span className="settings-symbol"><LineIcon name="costs"/></span><div><h3>Exchange rates</h3>{active&&<p className="rates-status">Manual rates active</p>}</div></div><form className="form-card" onSubmit={async event=>{event.preventDefault();const fd=new FormData(event.currentTarget);await commit(()=>db.transaction('rw',db.rateSets,async()=>{await db.rateSets.toCollection().modify({active:false});await db.rateSets.add({id:makeId(),label:'Manual rates',effectiveDate:new Date().toISOString().slice(0,10),kesPerKes:1,kesPerUsd:Number(fd.get('usd')),kesPerZar:Number(fd.get('zar')),active:true,example:false,createdAt:timestamp()})}))}}><div className="fields-two"><label className="field">KES per USD<input name="usd" type="number" min=".0001" step=".0001" required defaultValue={active?.kesPerUsd??example?.kesPerUsd}/></label><label className="field">KES per ZAR<input name="zar" type="number" min=".0001" step=".0001" required defaultValue={active?.kesPerZar??example?.kesPerZar}/></label></div><p className="caption">Manual rates · approximate conversions.</p><button className="save" disabled={busy}>Activate rates</button></form></section>
-    <section className="settings-panel backup-panel"><div className="settings-panel-heading"><span className="settings-symbol"><LineIcon name="download"/></span><h3>Backups</h3></div><p className="caption">ZIP files include unencrypted trip data and photos.</p><div className="backup-actions"><button className="backup-export" onClick={onExport} disabled={busy}><LineIcon name="download"/>Export ZIP</button><label className="backup-restore"> <LineIcon name="restore"/>Restore<input type="file" accept=".zip,application/zip" onChange={event=>event.target.files?.[0]&&onRestore(event.target.files[0])}/></label></div></section>
+    <section className="settings-panel"><div className="settings-panel-heading"><span className="settings-symbol"><LineIcon name="costs"/></span><div><h3>Exchange rates</h3>{active&&<p className="rates-status">Manual rates active</p>}</div></div><form className="form-card" onSubmit={async event=>{event.preventDefault();const fd=new FormData(event.currentTarget);await commit(()=>store.activateRateSet({id:makeId(),label:'Manual rates',effectiveDate:new Date().toISOString().slice(0,10),kesPerKes:1,kesPerUsd:Number(fd.get('usd')),kesPerZar:Number(fd.get('zar')),active:true,example:false,createdAt:timestamp()}))}}><div className="fields-two"><label className="field">KES per USD<input name="usd" type="number" min=".0001" step=".0001" required defaultValue={active?.kesPerUsd??example?.kesPerUsd}/></label><label className="field">KES per ZAR<input name="zar" type="number" min=".0001" step=".0001" required defaultValue={active?.kesPerZar??example?.kesPerZar}/></label></div><p className="caption">Manual rates · approximate conversions.</p><button className="save" disabled={busy}>Activate rates</button></form></section>
+    <section className="settings-panel backup-panel"><div className="settings-panel-heading"><span className="settings-symbol"><LineIcon name="download"/></span><h3>Backups</h3></div><p className="caption">ZIP files include unencrypted trip data and photos.{store.kind==='cloud'&&account?.role==='editor'?' Only the owner can replace the shared notebook.':''}</p><div className="backup-actions"><button className="backup-export" onClick={onExport} disabled={busy}><LineIcon name="download"/>Export ZIP</button>{canRestore&&<label className="backup-restore"> <LineIcon name="restore"/>Restore<input type="file" accept=".zip,application/zip" onChange={event=>event.target.files?.[0]&&onRestore(event.target.files[0])}/></label>}</div></section>
+    {account&&<CloudAccountSettings account={account} commit={commit} busy={busy}/>}
   </div>
+}
+
+function CloudAccountSettings({ account, commit, busy }: { account: CloudAccountControls; commit: SectionProps['commit']; busy: boolean }) {
+  const share = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const email = String(new FormData(event.currentTarget).get('shareEmail')).trim()
+    await commit(() => account.share(email), 'Shared access updated.')
+  }
+  return <section className="settings-panel access-panel">
+    <div className="settings-panel-heading"><span className="settings-symbol"><LineIcon name="people"/></span><div><h3>Shared access</h3><p className="rates-status">{account.role === 'owner' ? 'Owner' : 'Editor'}</p></div></div>
+    <p className="caption signed-in-email">{account.email}</p>
+    {account.role==='owner'&&<>
+      {account.claimedEmail?<div className="access-person"><span><strong>Shared with</strong><small>{account.claimedEmail}</small></span><button type="button" className="danger compact-action" disabled={busy} onClick={()=>{const userId=account.claimedUserId;if(userId&&confirm(`Remove access for ${account.claimedEmail}?`))void commit(()=>account.removeEditor(userId),'Traveller access removed.')}}>Remove</button></div>:
+        <form className="form-card access-form" onSubmit={share}><label className="field">Second traveller’s email<input name="shareEmail" type="email" autoComplete="email" required defaultValue={account.pendingEmail??''}/></label><div className="sharing-actions">{account.pendingEmail&&<button type="button" className="ghost" disabled={busy} onClick={()=>commit(()=>account.revokePending(),'Pending access removed.')}>Revoke</button>}<button className="save" disabled={busy}>Share trip</button></div>{account.pendingEmail&&<p className="caption">Waiting for {account.pendingEmail} to sign in.</p>}</form>}
+    </>}
+    <button type="button" className="text-action sign-out-action" onClick={()=>account.signOut()} disabled={busy}>Sign out</button>
+  </section>
 }

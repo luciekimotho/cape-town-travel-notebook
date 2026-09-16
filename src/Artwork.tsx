@@ -97,6 +97,7 @@ const paths: Record<string, ReactNode> = {
   trash: <><path d="M5 8h22M12 8V4h8v4M8 8l2 20h12l2-20M13 13v10m6-10v10"/></>,
   download: <><path d="M16 4v17m-6-6 6 6 6-6M6 22v6h20v-6"/></>,
   restore: <><path d="M6 12a11 11 0 1 1-1 11M6 5v8h8"/><path d="M16 10v7l5 3"/></>,
+  people: <><circle cx="12" cy="11" r="5"/><circle cx="23" cy="13" r="4"/><path d="M3 28c0-6 4-10 9-10s9 4 9 10M19 20c5 0 9 3 9 8"/></>,
 }
 
 export function LineIcon({ name }: { name: keyof typeof paths }) {

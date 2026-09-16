@@ -38,4 +38,4 @@ The `supabase-foundation` branch contains backend schema and client data-access 
 
 Cloud setup uses a fresh Cape Town 2026 bootstrap; existing browser data is not imported. It creates no test expenses, stamps, or photos and does not implement offline writes, dual-write synchronization, or an outbox.
 
-Project setup and RLS verification steps are documented in `supabase/README.md`. Run the Dashboard-ready `supabase/migrations/0001_setup.sql`, enable the approved Auth redirects, and test with disposable accounts before wiring or deploying cloud mode.
+Project setup and RLS verification steps are documented in `supabase/README.md`. Run the Dashboard-ready `supabase/migrations/0001_setup.sql` followed by the additive `supabase/migrations/0002_cloud_app.sql`, enable the approved Auth redirects, and test with disposable accounts before deploying cloud mode.
