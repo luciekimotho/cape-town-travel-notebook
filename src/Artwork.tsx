@@ -1,3 +1,4 @@
+import { SceneIllustration } from './SceneIllustrations'
 import type { ReactNode } from 'react'
 
 export type ArtKind = 'mountain' | 'penguin' | 'house' | 'cape' | 'lighthouse' | 'road' | 'boat' | 'huts' | 'promenade' | 'wine' | 'cliff' | 'pin'
@@ -30,10 +31,26 @@ export function colorForKind(kind: ArtKind) {
 
 const line = { fill: 'none', stroke: 'currentColor', strokeWidth: 3, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
 
-export function MarkerIcon({ kind, className }: { kind: ArtKind; className?: string }) {
-  return <svg className={className} x="10" y="20" width="108" height="78" viewBox="10 20 108 78" aria-hidden="true" {...line}>
-    {kind === 'mountain' && <><path d="M20 73 37 47h47l18 26M36 48l-7 25m54-25 10 25M15 78h95M49 41h27"/></>}
-    {kind === 'penguin' && <><path d="M48 72c-6-21-1-38 14-38s20 17 14 38M48 50l-9 15m37-15 9 15M51 75l-8 4m30-4 8 4"/><ellipse cx="62" cy="60" rx="9" ry="15"/><path d="m58 44 4 4 4-4"/><circle cx="57" cy="40" r="1"/><circle cx="67" cy="40" r="1"/></>}
+const markerFills: Record<ArtKind, ReactNode> = {
+  mountain: <><path d="M20 73 37 47h12l9-17h34l10 43Z" fill="#008c95"/><path d="m20 73 17-26h12l9-17 11 43Z" fill="#e95070"/><path d="M70 42h18l-9 9Z" fill="#e7a928"/></>,
+  penguin: <><path d="M43 72c-5-22 1-39 15-39s20 17 15 39Z" fill="#2855a6"/><ellipse cx="58" cy="42" rx="10" ry="8" fill="#fffaf0"/><ellipse cx="58" cy="59" rx="9" ry="15" fill="#fffaf0"/><path d="M82 73c-3-14 1-25 11-25s14 11 11 25Z" fill="#008c95"/><ellipse cx="93" cy="55" rx="7" ry="5" fill="#fffaf0"/><ellipse cx="93" cy="67" rx="5" ry="9" fill="#fffaf0"/><path d="m53 44 5 4 5-4m26 12 4 3 4-3" fill="#e7a928"/><path d="M48 76l-9 4m27-4 9 4m13-3-6 3m17-3 6 3" stroke="#e7a928" strokeWidth="6"/></>,
+  house: <><path d="M24 79V45l15-10 15 10v34Z" fill="#e95070"/><path d="M54 79V38l16-9 16 9v41Z" fill="#008c95"/><path d="M86 79V50l15-9 14 9v29Z" fill="#e7a928"/><path d="M35 79V61h9v18m22 0V58h9v21m20 0V64h9v15" fill="#fffaf0"/></>,
+  cape: <><path d="m32 37 25 8-9 13 22 7-4 10 24 6H30Z" fill="#4e8548"/><circle cx="33" cy="36" r="4" fill="#e95070"/><path d="M73 43h14l-7-7Z" fill="#e7a928"/><path d="M30 83q12-9 24 0t24 0t24 0v9H30Z" fill="#008c95"/></>,
+  lighthouse: <><path d="m50 78 6-29h16l6 29Z" fill="#fffaf0"/><path d="M53 64h22l2 8H52Z" fill="#e95070"/><path d="M55 39h19v10H55Z" fill="#e7a928"/><path d="m52 39 12-9 13 9Z" fill="#e95070"/></>,
+  road: <><path d="M17 75 39 43l22 17 18-26 27 41Z" fill="#4e8548"/><path d="m61 60 18-26 27 41H61Z" fill="#008c95"/><path d="M61 82c37-21-25-19 4-35" fill="none" stroke="#e7a928" strokeWidth="11"/></>,
+  boat: <><path d="M22 68h82L89 83H35Z" fill="#e95070"/><path d="M56 36 32 61h24Z" fill="#fffaf0"/><path d="m69 38 21 23H69Z" fill="#e7a928"/><path d="M20 90q14-7 28 0t28 0t28 0v8H20Z" fill="#008c95"/></>,
+  huts: <><path d="M16 79V51l15-12 15 12v28Z" fill="#e95070"/><path d="M49 79V42l15-12 15 12v37Z" fill="#e7a928"/><path d="M82 79V51l15-12 15 12v28Z" fill="#008c95"/><path d="M25 79V61h12v18m21 0V52h12v27m21 0V61h12v18" fill="#fffaf0"/></>,
+  promenade: <><path d="M30 49h48v7H30Z" fill="#e95070"/><path d="M88 36q-20-8-24 7 13-7 24-7m0 0q18-14 27 0-17-4-27 0m0 0q-4-18-16-16 9 6 16 16" fill="#4e8548"/><path d="M24 91q14-7 28 0t28 0t28 0v7H24Z" fill="#008c95"/></>,
+  wine: <><path d="M49 29h32l-3 26a13 13 0 0 1-26 0Z" fill="#fffaf0"/><path d="M51 43h28l-1 12a13 13 0 0 1-26 0Z" fill="#e95070"/><circle cx="32" cy="63" r="4" fill="#2855a6"/><circle cx="25" cy="68" r="4" fill="#2855a6"/><circle cx="34" cy="72" r="4" fill="#2855a6"/><path d="m92 62 12-22q-18 0-12 22Z" fill="#4e8548"/></>,
+  cliff: <><path d="m16 77 28-20 16-28 14 7 13 32 25 10Z" fill="#4e8548"/><path d="m60 29 1 33-18 15H16l28-20Z" fill="#008c95"/><path d="M15 87q14-7 28 0t28 0t28 0v11H15Z" fill="#2855a6"/></>,
+  pin: <><path d="M78 48c0 18-23 39-23 39S32 66 32 48a23 23 0 0 1 46 0Z" fill="#e95070"/><path d="M47 39h16v21H47Z" fill="#fffaf0"/><path d="M88 76l10-7 10 4 9-8v19H88Z" fill="#e7a928"/></>,
+}
+
+export function MarkerIcon({ kind, className, colorful = false }: { kind: ArtKind; className?: string; colorful?: boolean }) {
+  return <svg className={className} x="10" y="20" width="108" height="78" viewBox={colorful ? '6 18 116 82' : '10 20 108 78'} aria-hidden="true" {...line}>
+    {colorful && <g stroke="none" data-marker-fill={kind}>{markerFills[kind]}</g>}
+    {kind === 'mountain' && <><path d="M15 78h95M20 73 37 47h12l9-17h34l10 43M58 30h34M36 48l-7 25m54-43 10 43M69 30l-5 43M70 42h18l-9 9Zm9 9v13"/></>}
+    {kind === 'penguin' && <><path d="M43 72c-5-22 1-39 15-39s20 17 15 39M43 50 32 64m41-14 11 14M48 76l-9 4m27-4 9 4"/><ellipse cx="58" cy="59" rx="9" ry="15"/><path d="m53 44 5 4 5-4"/><circle cx="52" cy="40" r="1.4"/><circle cx="64" cy="40" r="1.4"/><path d="M82 73c-3-14 1-25 11-25s14 11 11 25M84 59l-7 8m25-8 7 8m-21 10-6 3m17-3 6 3m-16-24 4 3 4-3"/><circle cx="89" cy="53" r="1"/><circle cx="97" cy="53" r="1"/></>}
     {kind === 'house' && <path d="M24 79V45l15-10 15 10v34m0 0V38l16-9 16 9v41m0 0V50l15-9 14 9v29M20 79h100M35 79V61h9v18M66 79V58h9v21M95 79V64h9v15M33 48h12m19-6h13m18 11h10"/>}
     {kind === 'cape' && <><path d="m32 37 25 8-9 13 22 7-4 10 24 6M30 82q12-9 24 0t24 0t24 0M80 36v21m-7-14 7-7 7 7"/><circle cx="33" cy="36" r="4"/></>}
     {kind === 'lighthouse' && <path d="m50 78 6-29h16l6 29M48 79h33M55 49V39h19v10M52 39l12-9 13 9M60 58h9M41 43l-15 3m60-3 14 3M25 85q12-7 24 0t24 0t24 0"/>}
@@ -43,46 +60,73 @@ export function MarkerIcon({ kind, className }: { kind: ArtKind; className?: str
     {kind === 'promenade' && <path d="M16 77h100M30 49h48v7H30zm4 7v21m38-21v21M88 78V34m-7 0h14M24 91q14-7 28 0t28 0t28 0"/>}
     {kind === 'wine' && <><path d="M49 29h32l-3 26a13 13 0 0 1-26 0ZM52 43h25M65 68v18m-12 0h24M21 72l18-24m51 18 14-26"/><circle cx="32" cy="63" r="4"/><circle cx="25" cy="68" r="4"/><circle cx="34" cy="72" r="4"/></>}
     {kind === 'cliff' && <path d="m16 77 28-20 16-28 14 7 13 32 25 10M59 31l2 31-18 15M76 51l-2 21M15 87q14-7 28 0t28 0t28 0"/>}
-    {kind === 'pin' && <><path d="M78 48c0 18-23 39-23 39S32 66 32 48a23 23 0 0 1 46 0Z"/><circle cx="55" cy="48" r="8"/></>}
+    {kind === 'pin' && <><path d="M78 48c0 18-23 39-23 39S32 66 32 48a23 23 0 0 1 46 0Z"/><path d="M47 39h16v21H47zm5 0v-6h7v6M88 76l10-7 10 4 9-8M88 84h29"/></>}
   </svg>
 }
 
 export function PlaceScene({ name, className = 'landscape' }: { name: string; className?: string }) {
+  return <SceneIllustration kind={artKindFor(name)} className={className}/>
+}
+
+export function PlaceThumbnail({ name }: { name: string }) {
   const kind = artKindFor(name)
-  const water = <><path d="M0 98q65-13 130 0t130 0t130 0v52H0" fill="#008c95"/><path d="M0 127q65-9 130 0t130 0t130 0" fill="none" stroke="#fff4de" opacity=".65"/></>
-  return <svg className={className} viewBox="0 0 350 150" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-    <rect width="350" height="150" fill={kind === 'house' ? '#f5dec7' : '#dce9e1'}/><circle cx="274" cy="33" r="21" fill="#e7a928"/>
-    {kind === 'penguin' && <>{water}<path d="M0 135q90-49 175-10t175-14v39H0" fill="#e6d1a8"/><ellipse cx="145" cy="110" rx="47" ry="14" fill="#b8ad93"/><g fill="#28262a"><ellipse cx="175" cy="88" rx="23" ry="40"/><ellipse cx="208" cy="104" rx="16" ry="28"/></g><g fill="#fffaf0"><ellipse cx="176" cy="94" rx="14" ry="28"/><ellipse cx="209" cy="107" rx="10" ry="20"/><circle cx="183" cy="65" r="2"/></g><path d="m193 68 12 4-12 4m28 19 9 4-9 3M165 126h13m26 5h12" stroke="#bc6a2c" strokeWidth="4" strokeLinecap="round"/></>}
-    {kind === 'lighthouse' && <>{water}<path d="m105 140 39-37 49 2 40 35" fill="#577762"/><path d="m159 112 7-69h22l9 69" fill="#fffaf0"/><path d="M165 70h25l2 13h-28" fill="#e95070"/><path d="M162 43V28h29v15" fill="#2855a6"/><path d="m156 28 21-15 21 15" fill="#bc3557"/><path d="M173 31h9v9M173 94h9v17" fill="#fff4de"/><path d="m156 34-34 11m77-11 34 11" stroke="#e7a928" strokeWidth="4"/></>}
-    {kind === 'huts' && <>{water}<path d="M0 124q90-15 170 2t180-4v28H0" fill="#ead5ae"/><g stroke="#fff4de" strokeWidth="2"><path d="M93 111V61l23-15 23 15v50" fill="#e95070"/><path d="M139 111V61l23-15 23 15v50" fill="#e7a928"/><path d="M185 111V61l23-15 23 15v50" fill="#2855a6"/><path d="M231 111V61l23-15 23 15v50" fill="#008c95"/></g><g fill="#fff4de"><path d="M108 111V78h16v33m30 0V78h16v33m30 0V78h16v33m30 0V78h16v33"/></g></>}
-    {kind === 'road' && <>{water}<path d="M0 150V95l71-74 54 59 49-50 75 120" fill="#80936b"/><path d="m174 30 13 120H80l45-70" fill="#577762"/><path d="M215 150c-79-46-4-38-67-64s-20-39-20-39" fill="none" stroke="#f5eedc" strokeWidth="13"/><path d="M215 150c-79-46-4-38-67-64s-20-39-20-39" fill="none" stroke="#8b5700" strokeWidth="1.5" strokeDasharray="4 5"/></>}
-    {kind === 'boat' && <>{water}<path d="m122 104 105-2-17 22h-72" fill="#bc3557"/><path d="M175 37v65" stroke="#28262a" strokeWidth="3"/><path d="m167 44-39 48h39" fill="#fffaf0"/><path d="m183 50 32 42h-32" fill="#e7a928"/><path d="M28 93V68h55v25" fill="#e7a928"/><path d="m23 68 33-19 32 19" fill="#2855a6"/></>}
-    {kind === 'promenade' && <>{water}<path d="M0 107h350v16H0" fill="#e6d1a8"/><path d="M112 81h71v8h-71m7 0v18m56-18v18" fill="none" stroke="#315f2e" strokeWidth="5"/><path d="M225 106V40m-7 0h14" fill="none" stroke="#2855a6" strokeWidth="4"/><circle cx="225" cy="33" r="7" fill="#fffaf0"/></>}
-    {kind === 'wine' && <><path d="m0 99 72-38 70 39 52-33 65 30 91-36v89H0" fill="#80936b"/><path d="M0 150 125 99m-50 51 74-49m20 49 12-48m84 48-59-48m131 48-107-48" stroke="#315f2e" strokeWidth="8"/><path d="M155 22h39l-4 41a16 16 0 0 1-31 0Z" fill="#fffaf0"/><path d="M159 48h31l-3 18a13 13 0 0 1-25 0" fill="#bc3557"/><path d="M175 82v32m-16 0h32" stroke="#fffaf0" strokeWidth="4" strokeLinecap="round"/></>}
-    {kind === 'cliff' && <>{water}<path d="m34 141 65-29 43-35 26-50 23 11 43 88 59 15" fill="#80936b"/><path d="m168 27 3 69-41 32-96 13 65-29 43-35" fill="#577762"/><path d="m191 38-5 42 32 39" fill="none" stroke="#c1cda2" strokeWidth="3"/></>}
-    {kind === 'house' && <><path d="M20 140V55h80v85" fill="#e95070"/><path d="M100 140V30h78v110" fill="#008c95"/><path d="M178 140V60h72v80" fill="#e7a928"/><path d="M250 140V44h70v96" fill="#2855a6"/><g fill="#fff4de"><path d="M45 75h23v28H45zm80-22h23v28h-23zm77 28h23v28h-23zm71-16h23v28h-23z"/></g></>}
-    {kind === 'cape' && <><path d="M0 60q85 14 155 0t195 0v90H0" fill="#008c95"/><path d="M0 30h96l37 26-15 24 45 12 26 28-35 16-63-22-9-26L0 100Z" fill="#819a6a"/><path d="m13 37 64 19 27 11-8 21 42 16 25 16" fill="none" stroke="#fff4de" strokeWidth="4" strokeLinecap="round"/><path d="m245 91 30-29v29zm7 5h47l-9 8h-33z" fill="#fff4de"/></>}
-    {(kind === 'mountain' || kind === 'pin') && <><path d="m0 117 40-27 33 7 44-60h95l40 60 41-26 57 46v33H0" fill="#7d9b84"/><path d="m73 112 44-75h95l-21 75Z" fill="#577762"/><path d="M0 126q70-15 140 0t140 0t140 0v24H0" fill="#008c95"/></>}
+  return <svg className="place-thumbnail" data-thumbnail={kind} viewBox="0 0 128 112" preserveAspectRatio="xMidYMid meet" aria-hidden="true" focusable="false" style={{ color: '#23455b' }}>
+    <MarkerIcon kind={kind} colorful/>
   </svg>
+}
+
+export function stampTextLines(name: string, fontSize = 10): string[] {
+  const graphemes = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(name.toUpperCase())].map(part => part.segment)
+  // Conservative Georgia bold advances leave room for font substitution.
+  const advance = (text: string) => ( /^\s$/u.test(text) ? 4 : /^[MW]$/.test(text) ? 13 : /^[I.,'!:;|]$/.test(text) ? 5 : /^[A-Z0-9-]$/.test(text) ? 9 : /^\p{L}\p{M}*$/u.test(text) ? 12 : 14 ) * fontSize / 10
+  const lines: string[] = []
+  let pending: string[] = []
+  for (const grapheme of graphemes) {
+    while (pending.reduce((sum, text) => sum + advance(text), 0) + advance(grapheme) > 100) {
+      const breakAt = pending.findLastIndex(text => /\s/u.test(text))
+      const count = breakAt > 0 ? breakAt + 1 : pending.length
+      lines.push(pending.splice(0, count).join(''))
+    }
+    pending.push(grapheme)
+  }
+  if (pending.length) lines.push(pending.join(''))
+  return lines
+}
+
+export function stampLayout(name: string) {
+  for (const fontSize of [10, 9.5, 9, 8.5, 8, 7.5]) {
+    const lines = stampTextLines(name, fontSize)
+    const lineHeight = fontSize + 0.5
+    const titleBottom = 26 + Math.max(0, lines.length - 1) * lineHeight
+    if (titleBottom <= 90 || fontSize === 7.5) {
+      const markerTop = titleBottom + 6
+      const markerScale = Math.min(0.66, (103 - markerTop) / 78)
+      return { lines, fontSize, lineHeight, markerScale, markerTop }
+    }
+  }
+  throw new Error('Unable to lay out travel stamp')
+}
+
+export function stampMonthLabel(date?: string): string {
+  if (!date) return 'CAPE TOWN'
+  const parsedDate = new Date(`${date}T12:00:00Z`)
+  const month = new Intl.DateTimeFormat('en', { month: 'short', timeZone: 'UTC' }).format(parsedDate).toUpperCase()
+  return `${month === 'SEP' ? 'SEPT' : month} ${parsedDate.getUTCFullYear()}`
 }
 
 export function TravelStamp({ name, date, className = '' }: { name: string; date?: string; className?: string }) {
   const kind = artKindFor(name)
   const color = colorForKind(kind)
-  const label = name.toUpperCase().slice(0, 23)
-  const parsedDate = date ? new Date(`${date}T12:00:00Z`) : undefined
-  const dateLabel = parsedDate ? `${parsedDate.getUTCDate()} ${new Intl.DateTimeFormat('en', { month:'short', timeZone:'UTC' }).format(parsedDate).toUpperCase()} ${parsedDate.getUTCFullYear()}` : 'CAPE TOWN'
-  const rectangular = kind === 'house' || kind === 'road'
-  return <svg className={className} viewBox="0 0 128 128" role="img" aria-label={`${name} travel stamp`} style={{ color }}>
-    <g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      {rectangular ? <><rect x="5" y="9" width="118" height="110" rx="8" strokeDasharray="3 4"/><rect x="10" y="14" width="108" height="100" rx="5"/></> : <><circle cx="64" cy="64" r="59" strokeDasharray="3 3"/><circle cx="64" cy="64" r="54"/></>}
-      <g transform="translate(0 2)"><MarkerIcon kind={kind}/></g><path d="M31 88h66"/>
-    </g>
-    <g fill="currentColor" textAnchor="middle" fontFamily="Georgia,serif" fontWeight="bold">
-      <text x="64" y="28" fontSize={label.length > 15 ? 7.5 : 9}>{label}</text>
-      <text x="64" y="100" fontFamily="sans-serif" fontSize="7" letterSpacing="1.2">{dateLabel}</text>
-      <text x="64" y="110" fontFamily="sans-serif" fontSize="5.5" letterSpacing="1.3">{date ? 'VISITED' : 'SOUTH AFRICA'}</text>
-    </g>
+  const { lines, fontSize, lineHeight, markerScale, markerTop } = stampLayout(name)
+  const dateLabel = stampMonthLabel(date)
+  return <svg className={className} viewBox="0 0 128 129" role="img" aria-label={`${name} travel stamp, ${dateLabel}`} style={{ color }} data-safe-stamp="">
+    <rect x="4" y="6" width="120" height="117" rx="9" fill="#fff4de" stroke="currentColor" strokeWidth="2" strokeDasharray="3 3"/>
+    <rect data-inner-border="" x="10" y="12" width="108" height="105" rx="6" fill="none" stroke="currentColor" strokeWidth="1.6"/>
+    <text className="stamp-name" x="64" y="26" fill="currentColor" textAnchor="middle" fontFamily="Georgia,serif" fontWeight="bold" fontSize={fontSize} xmlSpace="preserve">
+      {lines.map((text, index) => <tspan x="64" dy={index === 0 ? 0 : lineHeight} key={index}>{text}</tspan>)}
+    </text>
+    <g data-stamp-marker="" transform={`translate(${64 - 64 * markerScale} ${markerTop - 20 * markerScale + (103 - markerTop - 78 * markerScale) / 2}) scale(${markerScale})`} fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><MarkerIcon kind={kind}/></g>
+    <text className="stamp-month" x="64" y="112" fill="currentColor" textAnchor="middle" fontFamily="sans-serif" fontSize="7.4" fontWeight="bold" letterSpacing="1.1">{dateLabel}</text>
   </svg>
 }
 

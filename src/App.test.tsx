@@ -92,6 +92,24 @@ describe('whole-app navigation and settings', () => {
 })
 
 describe('itinerary timeline and detail context', () => {
+  it('uses colored symbols on cards while keeping the wide detail scene', async () => {
+    await seedTour()
+    await renderApp()
+    const tour = screen.getByRole('button', { name: /Cape Peninsula Tour.*stops/ })
+    expect(tour.querySelector('.thumb [data-thumbnail="cape"]')).not.toBeNull()
+    expect(tour.querySelector('.thumb [data-scene]')).toBeNull()
+    fireEvent.click(tour)
+    expect(document.querySelector('.hero [data-scene="cape"]')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Itinerary' }))
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Notebook sections' })).getByRole('button', { name: 'Places' }))
+    const thumbnails = document.querySelectorAll('.place-entry .thumb')
+    expect(thumbnails.length).toBeGreaterThan(0)
+    for (const thumbnail of thumbnails) {
+      expect(thumbnail.querySelector('[data-thumbnail]')).not.toBeNull()
+      expect(thumbnail.querySelector('[data-scene]')).toBeNull()
+    }
+  })
+
   it('shows all tour stops in the compact itinerary timeline by default', async () => {
     await seedTour()
     await renderApp()
@@ -136,6 +154,29 @@ describe('itinerary timeline and detail context', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Itinerary' }))
     fireEvent.click(screen.getByRole('button', { name: 'Moments' }))
     expect(screen.getByRole('button', { name: /Bo-Kaap/ })).toBeInTheDocument()
+    expect(screen.queryByText('VISITED')).not.toBeInTheDocument()
+    expect(document.querySelector('.postcard-stamp .stamp-name')?.textContent).toBe('BO-KAAP')
+    fireEvent.click(screen.getByRole('button', { name: /Bo-Kaap/ }))
+    expect(document.querySelector('.hero [data-scene="house"]')).not.toBeNull()
+  })
+
+  it('preserves detached memory actions and recorded dates with the full-name panel', async () => {
+    await initializeDatabase()
+    const name = 'Café, São Tomé & Kaapstad — 海辺の散歩 🌊'
+    const stamp = { id: 'detached-review', placeName: name, visitDate: '2026-09-24', detached: true, createdAt: new Date().toISOString() }
+    await db.stamps.add(stamp)
+    await renderApp()
+    fireEvent.click(screen.getByRole('button', { name: 'Moments' }))
+    fireEvent.click(screen.getByRole('button', { name: new RegExp(name) }))
+    const dialog = screen.getByRole('dialog', { name: 'Moment' })
+    expect(dialog.querySelector('.stamp-name')?.textContent).toBe(name.toUpperCase())
+    expect(within(dialog).queryByText('VISITED')).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Add photo' })).toBeInTheDocument()
+    expect(await db.stamps.get(stamp.id)).toEqual(stamp)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete memory' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(await db.stamps.get(stamp.id)).toBeUndefined()
   })
 })
 
@@ -335,7 +376,7 @@ describe('form persistence and cancellation', () => {
     await renderApp()
 
     fireEvent.click(screen.getByRole('button', { name:'Moments' }))
-    fireEvent.click(screen.getAllByRole('button').find(button => button.textContent?.includes(place.name))!)
+    fireEvent.click(screen.getByRole('button', { name: accessibleName => accessibleName.includes(`${place.name} travel stamp`) }))
     const momentsSection = screen.getByRole('heading', { name:'Moments' }).closest('section')!
     fireEvent.click(within(momentsSection).getByRole('button', { name:'Edit' }))
     fireEvent.change(screen.getByLabelText('Caption'), { target:{ value:'Saved caption' } })

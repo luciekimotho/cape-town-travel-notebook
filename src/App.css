@@ -149,7 +149,7 @@ svg { display: block; }
 }
 .activity-card:hover { border-color: #8caba2; background: #fffdf6; }
 .thumb { width: 70px; height: 76px; flex-shrink: 0; overflow: hidden; background: #dce9e1; border-radius: 10px; }
-.thumb .landscape { width: 100%; height: 100%; }
+.thumb .place-thumbnail { display: block; width: 100%; height: 100%; background: #fff4de; }
 .card-copy { min-width: 0; flex: 1; }
 .card-copy h3 { font-size: 20px; line-height: 1.16; overflow-wrap: anywhere; }
 .card-copy small { display: block; margin-top: 7px; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -261,18 +261,9 @@ svg { display: block; }
 .checked .copy strong { color: var(--muted); text-decoration: line-through; }
 .row-open { min-height: 51px; padding: 4px 0; color: var(--ink); background: transparent; border: 0; text-align: left; }
 
-.postcards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 12px; }
-.postcard { position: relative; min-width: 0; padding: 7px 7px 13px; color: var(--ink); background: #fffbf1; border: 1px solid #d6c6a8; border-radius: 4px 4px 9px 5px; box-shadow: 0 3px 0 #28262a09; text-align: left; }
-.postcard-visual { position: relative; height: 143px; display: block; margin-bottom: 18px; overflow: visible; background: #e1eade; border-radius: 2px; }
-.postcard-visual > .landscape, .postcard-visual > img { width: 100%; height: 100%; object-fit: cover; border-radius: 2px; }
-.postcard-stamp { position: absolute; right: -4px; bottom: -16px; width: 83px; height: 83px; background: #fffaf0e8; border-radius: 50%; transform: rotate(-11deg); }
-.postcard-stamp svg { width: 100%; height: 100%; }
-.postcard-name { display: block; padding: 4px 5px 0; font: 17px/1.2 Georgia,serif; overflow-wrap: anywhere; }
-.postcard small { display: block; margin-top: 6px; padding: 0 5px; color: var(--muted); font-size: 10px; }
 .empty-compact { padding: 20px 2px; color: var(--muted); font-size: 13px; }
 .detached-memory { display: grid; justify-items: center; gap: 10px; text-align: center; }
 .detached-memory .detached-scene { width: 100%; height: 180px; border-radius: 12px; }
-.detached-memory .detached-stamp { width: 150px; height: 150px; }
 
 .currency-tabs { display: flex; gap: 4px; margin-bottom: 18px; padding: 4px; background: #e9ddc5; border: 1px solid #ddcdae; border-radius: 13px; }
 .currency-tabs button { position: relative; min-width: 44px; min-height: 44px; flex: 1; color: #615a50; background: transparent; border: 0; border-radius: 9px; font-size: 12px; font-weight: 700; letter-spacing: .06em; }
@@ -411,7 +402,6 @@ svg { display: block; }
   .sheet-body { padding: 15px; }
   .plain-row { padding: 11px 9px; }
   .plain-row .amount { font-size: 12px; }
-  .postcard-visual { height: 125px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
