@@ -1,6 +1,14 @@
 import type { Session } from '@supabase/supabase-js'
 import { clearCloudSession, getCloudClient } from './client'
 
+export function consumeAuthCallbackError(): string {
+  const parameters = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+  const description = parameters.get('error_description')
+  if (!description) return ''
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
+  return description.replace(/\+/g, ' ')
+}
+
 export async function requestSignIn(email: string) {
   const normalized = email.trim().toLowerCase()
   if (!normalized) throw new Error('Email is required.')

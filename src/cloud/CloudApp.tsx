@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { NotebookApplication, TransientNotice, type CloudAccountControls } from '../App'
-import { claimSharedTrip, currentSession, requestSignIn, signOut } from './auth'
+import { claimSharedTrip, consumeAuthCallbackError, currentSession, requestSignIn, signOut } from './auth'
 import { getCloudClient } from './client'
 import { cloudSetupIssue } from './config'
 import { CloudNotebookStore } from './notebookStore'
@@ -13,10 +13,11 @@ export default function CloudApp() {
   const [trip, setTrip] = useState<CloudTripSummary>()
   const [collaboration, setCollaboration] = useState<CollaborationStatus>()
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const [errorVersion, setErrorVersion] = useState(0)
+  const [error, setError] = useState(consumeAuthCallbackError)
+  const [errorVersion, setErrorVersion] = useState(error ? 1 : 0)
   const [notice, setNotice] = useState('')
   const [noticeVersion, setNoticeVersion] = useState(0)
+  const [linkRequested, setLinkRequested] = useState(false)
   const [online, setOnline] = useState(navigator.onLine)
   const store = useMemo(() => trip ? new CloudNotebookStore(trip.id) : undefined, [trip])
   const repository = useMemo(() => trip ? new CloudNotebookRepository(trip.id) : undefined, [trip])
@@ -79,11 +80,11 @@ export default function CloudApp() {
     const submit = async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault()
       const email = String(new FormData(event.currentTarget).get('email'))
-      await run(() => requestSignIn(email), 'Check your email and open the secure sign-in link.')
+      if (await run(() => requestSignIn(email), 'Check your email and open the secure sign-in link.')) setLinkRequested(true)
     }
     return <CloudEntry title="Your shared travel notebook">
       <p>Sign in with your email to open the private Cape Town trip.</p>
-      <form className="cloud-entry-form" onSubmit={submit}><label className="field">Email<input name="email" type="email" autoComplete="email" required/></label><button className="save" disabled={busy}>Email me a sign-in link</button></form>
+      <form className="cloud-entry-form" onSubmit={submit}><label className="field">Email<input name="email" type="email" autoComplete="email" required disabled={linkRequested}/></label><button className="save" disabled={busy||linkRequested}>{linkRequested?'Link sent — check your email':'Email me a sign-in link'}</button></form>
       {error&&<TransientNotice message={error} version={errorVersion} tone="error" onDismiss={()=>setError('')}/>}
       {!error&&notice&&<TransientNotice message={notice} version={noticeVersion} onDismiss={()=>setNotice('')}/>}
     </CloudEntry>
