@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { listCloudTrips, loadCloudNotebook } from './repository'
+import { createFreshTrip, listCloudTrips, loadCloudNotebook } from './repository'
 
 describe('cloud repository', () => {
+  it('creates the fresh Cape Town notebook through the server bootstrap', async () => {
+    const client = { rpc:async()=>({data:'trip-1',error:null}) } as unknown as SupabaseClient
+    await expect(createFreshTrip(client)).resolves.toBe('trip-1')
+  })
+
   it('loads only the trip summaries acknowledged by the membership RPC', async () => {
     const client = {
       rpc:async()=>({ data:[{ id:'trip-1', destination:'Cape Town', role:'owner', updated_at:'2026-01-01' }], error:null }),

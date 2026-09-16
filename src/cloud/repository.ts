@@ -21,6 +21,13 @@ export async function listCloudTrips(client: SupabaseClient = getCloudClient()):
   }))
 }
 
+export async function createFreshTrip(client: SupabaseClient = getCloudClient()): Promise<string> {
+  const { data, error } = await client.rpc('create_capetown_2026_trip')
+  if (error) throw error
+  if (typeof data !== 'string') throw new Error('The server did not create the trip.')
+  return data
+}
+
 export async function loadCloudNotebook(tripId: string, client: SupabaseClient = getCloudClient()): Promise<AppData> {
   const { data, error } = await client.rpc('load_notebook_v4', { p_trip_id:tripId })
   if (error) throw error

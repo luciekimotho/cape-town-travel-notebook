@@ -21,10 +21,8 @@ export async function signOut() {
   await clearCloudSession()
 }
 
-export async function acceptInvitation(token: string) {
-  const normalized = token.trim()
-  if (!normalized) throw new Error('Invitation token is required.')
-  const { data, error } = await getCloudClient().rpc('accept_trip_invitation', { p_token: normalized })
+export async function claimSharedTrip() {
+  const { data, error } = await getCloudClient().rpc('claim_trip_access')
   if (error) throw error
   return data
 }

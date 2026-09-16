@@ -34,8 +34,8 @@ Saved addresses and Google Maps links remain editable in activity forms and appe
 
 ## Supabase foundation
 
-The `supabase-foundation` branch contains an opt-in online-first collaboration foundation. It is disabled unless `VITE_ENABLE_SUPABASE=true` and a public Supabase project URL and publishable client key are provided. Never put a service-role or secret key in frontend environment variables.
+The `supabase-foundation` branch contains backend schema and client data-access groundwork for an online-first collaboration cutover. It is not connected to the notebook UI yet, so the current app remains entirely on IndexedDB. Never put a service-role or secret key in frontend environment variables.
 
-The planned cutover is a one-time, owner-confirmed import from the existing browser notebook or a validated ZIP. It preserves IDs, group links, recorded expense dates/rate snapshots, stamp/photo relationships, and photo bytes. It does not delete the browser database, and it does not implement offline writes, dual-write synchronization, or an outbox.
+Cloud setup uses a fresh Cape Town 2026 bootstrap; existing browser data is not imported. It creates no test expenses, stamps, or photos and does not implement offline writes, dual-write synchronization, or an outbox.
 
-Project setup and RLS verification steps are documented in `supabase/README.md`. Applying the migration, enabling the approved Auth redirects, and testing with disposable accounts are required before cloud mode can be deployed or real notebook data can be imported.
+Project setup and RLS verification steps are documented in `supabase/README.md`. Run the Dashboard-ready `supabase/migrations/0001_setup.sql`, enable the approved Auth redirects, and test with disposable accounts before wiring or deploying cloud mode.

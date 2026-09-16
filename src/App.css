@@ -353,13 +353,6 @@ svg { display: block; }
 .backup-export { color: var(--paper-card); background: var(--teal); border: 0; }
 .backup-restore { position: relative; color: var(--teal); background: var(--paper-deep); border: 1px solid #dfd0b3; cursor: pointer; }
 .backup-restore input { position: absolute; width: 1px; height: 1px; opacity: 0; }
-.cloud-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.import-summary { display: grid; gap: 4px; margin: 15px 0; padding: 13px; background: var(--paper-deep); border: 1px solid var(--line); border-radius: 11px; }
-.import-summary span { color: var(--muted); font-size: 11px; }
-.cloud-panel > .backup-restore, .cloud-panel > .backup-export, .cloud-panel > .save { width: 100%; margin-top: 10px; }
-.import-confirm { display: flex; align-items: flex-start; gap: 9px; margin: 14px 0 4px; font-size: 12px; line-height: 1.45; }
-.import-confirm input { width: 22px; height: 22px; flex-shrink: 0; accent-color: var(--teal); }
-
 .message { position: sticky; z-index: 80; top: 8px; display: flex; align-items: center; justify-content: space-between; margin: 8px 16px -4px; padding: 10px 12px; color: var(--leaf-dark); background: #e6f1dc; border: 2px solid var(--leaf); border-radius: 12px; font-size: 12px; font-weight: 700; }
 .message.error { color: #792436; background: #ffe6e9; border-color: var(--error); }
 .message button { width: 44px; min-width: 44px; height: 44px; margin: -8px -8px -8px 8px; color: inherit; background: transparent; border: 0; font-size: 20px; }
