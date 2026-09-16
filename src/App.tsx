@@ -1,7 +1,10 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { createBackup, parseBackup, restoreBackup } from './backup'
 import { createItineraryPlace, db, deleteItineraryGroup, deleteItineraryItem, initializeDatabase, loadData, makeId, materializeTemplate, saveItineraryDetails, scheduleCandidatePlace } from './db'
 import { compressPhoto } from './photo'
+import { cloudFeatureEnabled } from './cloud/config'
+
+const CloudMigrationPanel = lazy(() => import('./cloud/CloudMigrationPanel').then(module => ({ default:module.CloudMigrationPanel })))
 import { artKindFor, colorForKind, EmptyDayArt, LineIcon, MarkerIcon, PlaceScene, TravelStamp } from './Artwork'
 import type { ActivityTemplate, AppData, BookingStatus, ChecklistItem, Currency, Expense, ItineraryItem, PhotoEntry, Place, RateSet, TravelStamp as Stamp } from './types'
 import './App.css'
@@ -460,5 +463,6 @@ function Settings({ data, commit, busy, onExport, onRestore }: SectionProps & { 
   return <div className="settings-stack">
     <section className="settings-panel"><div className="settings-panel-heading"><span className="settings-symbol"><LineIcon name="costs"/></span><div><h3>Exchange rates</h3>{active&&<p className="rates-status">Manual rates active</p>}</div></div><form className="form-card" onSubmit={async event=>{event.preventDefault();const fd=new FormData(event.currentTarget);await commit(()=>db.transaction('rw',db.rateSets,async()=>{await db.rateSets.toCollection().modify({active:false});await db.rateSets.add({id:makeId(),label:'Manual rates',effectiveDate:new Date().toISOString().slice(0,10),kesPerKes:1,kesPerUsd:Number(fd.get('usd')),kesPerZar:Number(fd.get('zar')),active:true,example:false,createdAt:timestamp()})}))}}><div className="fields-two"><label className="field">KES per USD<input name="usd" type="number" min=".0001" step=".0001" required defaultValue={active?.kesPerUsd??example?.kesPerUsd}/></label><label className="field">KES per ZAR<input name="zar" type="number" min=".0001" step=".0001" required defaultValue={active?.kesPerZar??example?.kesPerZar}/></label></div><p className="caption">Manual rates · approximate conversions.</p><button className="save" disabled={busy}>Activate rates</button></form></section>
     <section className="settings-panel backup-panel"><div className="settings-panel-heading"><span className="settings-symbol"><LineIcon name="download"/></span><h3>Backups</h3></div><p className="caption">ZIP files include unencrypted trip data and photos.</p><div className="backup-actions"><button className="backup-export" onClick={onExport} disabled={busy}><LineIcon name="download"/>Export ZIP</button><label className="backup-restore"> <LineIcon name="restore"/>Restore<input type="file" accept=".zip,application/zip" onChange={event=>event.target.files?.[0]&&onRestore(event.target.files[0])}/></label></div></section>
+    {cloudFeatureEnabled && <Suspense fallback={<section className="settings-panel cloud-panel"><h3>Shared access</h3><p className="caption">Loading…</p></section>}><CloudMigrationPanel localData={data} onExport={onExport}/></Suspense>}
   </div>
 }
