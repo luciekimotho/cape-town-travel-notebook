@@ -83,7 +83,6 @@ export default function CloudApp() {
       if (await run(() => requestSignIn(email), 'Check your email and open the secure sign-in link.')) setLinkRequested(true)
     }
     return <CloudEntry title="Your shared travel notebook">
-      <p>Sign in with your email to open the private Cape Town trip.</p>
       <form className="cloud-entry-form" onSubmit={submit}><label className="field">Email<input name="email" type="email" autoComplete="email" required disabled={linkRequested}/></label><button className="save" disabled={busy||linkRequested}>{linkRequested?'Link sent — check your email':'Email me a sign-in link'}</button></form>
       {error&&<TransientNotice message={error} version={errorVersion} tone="error" onDismiss={()=>setError('')}/>}
       {!error&&notice&&<TransientNotice message={notice} version={noticeVersion} onDismiss={()=>setNotice('')}/>}
