@@ -368,6 +368,13 @@ svg { display: block; }
 .cloud-entry-card h1 { max-width: 320px; margin: 0 0 10px; font: 700 clamp(25px,8vw,34px)/1.05 Georgia,serif; }
 .cloud-entry-card > p { margin: 0 0 18px; color: var(--muted); line-height: 1.55; }
 .cloud-entry-form { display: grid; gap: 14px; }
+.auth-instructions { margin: 12px 0; color: var(--muted); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.auth-method { display: block; margin-top: 16px; text-align: left; }
+.auth-email-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; margin-top: 16px; }
+.auth-email-actions button, .auth-method { min-height: 44px; }
+.auth-error { margin-top: 16px; color: var(--error); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.email-sign-in input[name="code"] { font-size: 22px; letter-spacing: .16em; }
+.email-sign-in textarea { min-height: 90px; font-size: 16px; overflow-wrap: anywhere; }
 .cloud-entry-form .save, .cloud-create { width: 100%; min-height: 48px; }
 .cloud-sign-out { display: block; margin: 18px auto 0; }
 .message { position: sticky; z-index: 80; top: 8px; display: flex; align-items: center; justify-content: space-between; margin: 8px 16px -4px; padding: 10px 12px; color: var(--leaf-dark); background: #e6f1dc; border: 2px solid var(--leaf); border-radius: 12px; font-size: 12px; font-weight: 700; }
