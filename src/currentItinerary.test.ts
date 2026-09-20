@@ -79,6 +79,24 @@ describe('Cape Town current itinerary activity', () => {
       .toMatchObject({ dayId: '2026-09-20', itemId: 'packing', localTime: '18:30' })
   })
 
+  it('uses item timezones for a multi-timezone travel day', () => {
+    const notebook = data([
+      item('travel-day', '01:30', 1),
+      item('boarding-et309', '01:30', 0, { parentId: 'travel-day' }),
+      item('flight-et309', '03:00', 1, { parentId: 'travel-day' }),
+      item('hotel-check-in', '15:00', 2, { parentId: 'travel-day' }),
+    ])
+    notebook.metadata.push(
+      { key: 'item.timezone.travel-day', value: 'Africa/Nairobi' },
+      { key: 'item.timezone.boarding-et309', value: 'Africa/Nairobi' },
+      { key: 'item.timezone.flight-et309', value: 'Africa/Nairobi' },
+    )
+    expect(currentItineraryState(notebook, new Date('2026-09-20T22:40:00Z')))
+      .toMatchObject({ dayId: '2026-09-21', itemId: 'travel-day', childItemId: 'boarding-et309' })
+    expect(currentItineraryState(notebook, new Date('2026-09-21T13:30:00Z')))
+      .toMatchObject({ itemId: 'travel-day', childItemId: 'hotel-check-in' })
+  })
+
   it('keeps a daytime family activity current until evening preparations begin', () => {
     const notebook = data([
       item('kids', '13:30', 1),

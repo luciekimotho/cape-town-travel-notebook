@@ -1,6 +1,6 @@
 # Supabase setup
 
-The complete cloud setup uses five application migrations plus two reviewed user-data updates:
+The complete cloud setup uses five application migrations plus three reviewed user-data updates:
 
 | Migration | Contents |
 | --- | --- |
@@ -11,6 +11,7 @@ The complete cloud setup uses five application migrations plus two reviewed user
 | `0005_confirmed_reservations.sql` | One-time, fail-safe update for the supplied confirmed flights and Hyatt stay; excludes passenger, ticket, seat and booking identifiers |
 | `0006_itinerary_links.sql` | Provider-restricted GetYourGuide/Google Maps links on itinerary items, including read/mutation/restore RPC support |
 | `0007_itinerary_link_data.sql` | Reviewed product links on tour groups and Google Maps area links on relevant personal itinerary stops |
+| `0008_boarding_et309_now.sql` | Confirmed ET309 boarding activity at 01:30 Nairobi time; updates the existing travel-day group and boarding stop without duplicating either |
 
 Apply `migrations/0001_setup.sql` through the normal migration runner (for example,
 `supabase db push`) after confirming the target Supabase project. Then apply
@@ -29,7 +30,8 @@ For Dashboard-only setup:
    Finally run the complete `migrations/0004_stamp_designs.sql` in another new query.
    Run `migrations/0005_confirmed_reservations.sql` only for the intended personal notebook after reviewing its confirmed travel details.
    Then run `migrations/0006_itinerary_links.sql`, followed by the personal
-   `migrations/0007_itinerary_link_data.sql`.
+   `migrations/0007_itinerary_link_data.sql`. Run `migrations/0008_boarding_et309_now.sql`
+   only after confirming the live ET309 boarding update.
 3. Configure the Authentication Site URL and Redirect URLs for the deployed and local app.
 4. Keep passwordless email sign-in enabled.
 5. Verify the `trip-photos` Storage bucket exists and is private.

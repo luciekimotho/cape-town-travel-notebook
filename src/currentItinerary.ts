@@ -45,6 +45,12 @@ function scheduledRoots(data: AppData, dayId: string): ItineraryItem[] {
       left.id.localeCompare(right.id))
 }
 
+function hasStarted(data: AppData, item: ItineraryItem, date: string, now: Date, fallbackTimezone: string): boolean {
+  const timezone = data.metadata.find(entry => entry.key === `item.timezone.${item.id}`)?.value ?? fallbackTimezone
+  const local = zonedDateAndTime(now, timezone)
+  return Boolean(local && local.date === date && item.time! <= local.time)
+}
+
 export function currentItineraryState(data: AppData, now: Date): CurrentItineraryState {
   const overriddenDay = data.days.find(day => {
     const timezone = data.metadata.find(entry => entry.key === `day.timezone.${day.date}`)?.value
@@ -58,7 +64,7 @@ export function currentItineraryState(data: AppData, now: Date): CurrentItinerar
   const day = overriddenDay ?? data.days.find(candidate => candidate.date === local.date)
   if (!day) return { localDate: local.date, localTime: local.time }
   const roots = scheduledRoots(data, day.id)
-  const latestTime = roots.filter(item => item.time! <= local.time).at(-1)?.time
+  const latestTime = roots.filter(item => hasStarted(data, item, day.date, now, timezone)).at(-1)?.time
   // For identical starts, the first stable itinerary entry wins.
   const current = latestTime ? roots.find(item => item.time === latestTime) : undefined
   const children = current
@@ -69,7 +75,7 @@ export function currentItineraryState(data: AppData, now: Date): CurrentItinerar
           left.position - right.position ||
           left.id.localeCompare(right.id))
     : []
-  const latestChildTime = children.filter(item => item.time! <= local.time).at(-1)?.time
+  const latestChildTime = children.filter(item => hasStarted(data, item, day.date, now, timezone)).at(-1)?.time
   const currentChild = latestChildTime ? children.find(item => item.time === latestChildTime) : undefined
   return { dayId: day.id, itemId: current?.id, childItemId: currentChild?.id, localDate: local.date, localTime: local.time }
 }
