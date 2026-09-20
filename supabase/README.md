@@ -32,6 +32,20 @@ For Dashboard-only setup:
 Never put a `service_role` key in frontend code. Clients use the anon key with an
 authenticated session; RLS remains the authorization boundary.
 
+## Email and password
+
+Keep **Authentication → Providers → Email** enabled. Existing members may set a
+password from the app after verified email sign-in. The app updates that same
+authenticated user with `auth.updateUser({ password })`; it never calls `signUp`,
+creates a replacement account, or enables anonymous authentication. Password sign-in
+therefore retains the user's UUID and existing trip membership.
+
+Password login itself does not require custom SMTP. First-time invited travellers
+still need one verified-email login to claim exact-email access before setting a
+password. Recovery uses Email code/link sign-in followed by setting a new password;
+the app deliberately does not expose a redirect-based forgot-password flow while
+iOS standalone-link handling and live email delivery remain constrained.
+
 ## Fresh Cape Town data
 
 After the intended owner signs in, call:

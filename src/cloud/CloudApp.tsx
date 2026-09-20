@@ -4,7 +4,7 @@ import { NotebookApplication, type CloudAccountControls, type DownloadControls }
 import type { AppData } from '../types'
 import { offlineDownloads, isAuthorizationError, isMembershipRevokedError as membershipDenied, type DownloadedTrip } from '../offline/downloads'
 import { DownloadedNotebookStore } from '../offline/store'
-import { claimSharedTrip, consumeAuthCallbackError, currentSession, signOut } from './auth'
+import { claimSharedTrip, consumeAuthCallbackError, currentSession, signOut, updateCurrentUserPassword } from './auth'
 import { EmailSignIn } from './EmailSignIn'
 import { getCloudClient } from './client'
 import { cloudSetupIssue } from './config'
@@ -369,6 +369,7 @@ export default function CloudApp() {
     async share(email) { requireVerified(); await repository!.shareWithEmail(email); await refreshCollaboration() },
     async revokePending() { requireVerified(); await repository!.revokePendingShare(); await refreshCollaboration() },
     async removeEditor(id) { requireVerified(); await repository!.removeClaimedEditor(id); await refreshCollaboration() },
+    async setPassword(password) { requireVerified(); await updateCurrentUserPassword(password) },
     signOut: logout,
   } : undefined
 

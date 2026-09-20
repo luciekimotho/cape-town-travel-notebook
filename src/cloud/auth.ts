@@ -22,6 +22,27 @@ export async function requestSignIn(email: string) {
   if (error) throw error
 }
 
+export async function signInWithPassword(email: string, password: string): Promise<Session> {
+  const normalized = email.trim().toLowerCase()
+  if (!normalized || !password) throw new Error('Email and password are required.')
+  const { data, error } = await getCloudClient().auth.signInWithPassword({ email: normalized, password })
+  if (error) throw error
+  if (!data.session) throw new Error('Sign-in was not completed. Check your details and try again.')
+  return data.session
+}
+
+export async function updateCurrentUserPassword(password: string): Promise<void> {
+  const client = getCloudClient()
+  const { data: current, error: currentError } = await client.auth.getUser()
+  if (currentError) throw currentError
+  if (!current.user) throw new Error('Sign in again before setting a password.')
+  const { data, error } = await client.auth.updateUser({ password })
+  if (error) throw error
+  if (!data.user || data.user.id !== current.user.id) {
+    throw new Error('The password update was not acknowledged for this account.')
+  }
+}
+
 export async function verifySignInCode(email: string, code: string): Promise<Session> {
   const token = code.replace(/\s/g, '')
   if (!/^\d{6,10}$/.test(token)) throw new Error('Enter the 6–10 digit code from your email.')

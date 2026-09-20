@@ -364,6 +364,12 @@ svg { display: block; }
 .sharing-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .compact-action { min-height: 44px; padding: 8px 12px; }
 .sign-out-action { margin-top: 14px; }
+.password-settings { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.password-settings summary { min-height: 44px; display: flex; align-items: center; color: var(--teal); font-size: 13px; font-weight: 700; cursor: pointer; }
+.password-settings form { margin-top: 10px; }
+.password-message, .password-error { margin-top: 10px; font-size: 12px; line-height: 1.5; }
+.password-message { color: var(--leaf-dark); }
+.password-error { color: var(--error); }
 
 .cloud-entry { min-height: 100dvh; padding: 0 18px 40px; background: var(--paper); }
 .cloud-facades { display: grid; grid-template-columns: repeat(5, 1fr); height: 118px; margin: 0 -18px 38px; overflow: hidden; border-bottom: 4px solid var(--ink); }
@@ -379,6 +385,10 @@ svg { display: block; }
 .cloud-entry-card h1 { max-width: 320px; margin: 0 0 10px; font: 700 clamp(25px,8vw,34px)/1.05 Georgia,serif; }
 .cloud-entry-card > p { margin: 0 0 18px; color: var(--muted); line-height: 1.55; }
 .cloud-entry-form { display: grid; gap: 14px; }
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 18px; padding: 4px; background: var(--paper-deep); border-radius: 12px; }
+.auth-tabs button { min-height: 44px; padding: 8px; color: var(--muted); background: transparent; border: 0; border-radius: 9px; font-weight: 700; }
+.auth-tabs button[aria-selected="true"] { color: var(--paper-card); background: var(--teal); }
+.inline-auth-action { display: inline; min-height: 44px; padding: 8px 2px; color: var(--teal); background: none; border: 0; text-decoration: underline; font: inherit; }
 .auth-instructions { margin: 12px 0; color: var(--muted); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .auth-method { display: block; margin-top: 16px; text-align: left; }
 .auth-email-actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; margin-top: 16px; }

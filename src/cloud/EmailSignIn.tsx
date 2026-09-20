@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { errorMessage } from '../errorMessage'
-import { requestSignIn, verifySignInCode, verifySignInLink } from './auth'
+import { requestSignIn, signInWithPassword, verifySignInCode, verifySignInLink } from './auth'
 
 export function EmailSignIn({ onSignedIn }: { onSignedIn: (session: Session) => void }) {
   const [email, setEmail] = useState('')
+  const [signInMethod, setSignInMethod] = useState<'password' | 'email'>('password')
+  const [password, setPassword] = useState('')
   const [sentTo, setSentTo] = useState('')
   const [credential, setCredential] = useState('')
   const [method, setMethod] = useState<'code' | 'link'>('code')
@@ -19,6 +21,21 @@ export function EmailSignIn({ onSignedIn }: { onSignedIn: (session: Session) => 
     return () => window.clearInterval(timer)
   }, [resendAt])
   const remaining = Math.max(0, Math.ceil((resendAt - now) / 1000))
+  useEffect(() => () => setPassword(''), [])
+  const passwordSignIn = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (inFlight.current) return
+    inFlight.current = true
+    setBusy(true); setError('')
+    const submitted = password
+    setPassword('')
+    try {
+      if (!navigator.onLine) throw new Error('Connect to the internet to sign in.')
+      onSignedIn(await signInWithPassword(email, submitted))
+    } catch (error) {
+      setError(errorMessage(error, 'Sign-in failed. Check your details or use email code/link.'))
+    } finally { inFlight.current = false; setBusy(false) }
+  }
   const request = async (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault()
     if (inFlight.current || Date.now() < resendAt) return
@@ -52,7 +69,16 @@ export function EmailSignIn({ onSignedIn }: { onSignedIn: (session: Session) => 
     } finally { inFlight.current = false; setBusy(false) }
   }
   return <div className="email-sign-in">
-    {!sentTo ? <form className="cloud-entry-form" onSubmit={request}>
+    {!sentTo && <div className="auth-tabs" role="tablist" aria-label="Sign-in method">
+      <button type="button" role="tab" aria-selected={signInMethod === 'password'} onClick={() => { setSignInMethod('password'); setPassword(''); setError('') }}>Password</button>
+      <button type="button" role="tab" aria-selected={signInMethod === 'email'} onClick={() => { setSignInMethod('email'); setPassword(''); setError('') }}>Email code / link</button>
+    </div>}
+    {!sentTo && signInMethod === 'password' ? <form className="cloud-entry-form" onSubmit={passwordSignIn}>
+      <label className="field">Email<input name="email" type="email" autoComplete="email" required value={email} onChange={event => setEmail(event.target.value)} disabled={busy}/></label>
+      <label className="field">Password<input name="password" type="password" autoComplete="current-password" required value={password} onChange={event => setPassword(event.target.value)} disabled={busy}/></label>
+      <button className="save" disabled={busy}>{busy ? 'Signing in…' : 'Sign in with password'}</button>
+      <p className="auth-instructions">First time here, or forgot your password? Use <button className="inline-auth-action" type="button" onClick={() => { setSignInMethod('email'); setPassword(''); setError('') }}>Email code / link</button>, then set a new password in Settings.</p>
+    </form> : !sentTo ? <form className="cloud-entry-form" onSubmit={request}>
       <label className="field">Email<input name="email" type="email" autoComplete="email" required value={email} onChange={event => setEmail(event.target.value)} disabled={busy}/></label>
       <button className="save" disabled={busy || remaining > 0}>{busy ? 'Sending…' : remaining ? `Try again in ${remaining}s` : 'Email me a sign-in code'}</button>
       <button className="text-action" type="button" disabled={busy} onClick={event => {

@@ -37,6 +37,7 @@ export interface CloudAccountControls {
   share(email: string): Promise<void>
   revokePending(): Promise<void>
   removeEditor(userId: string): Promise<void>
+  setPassword(password: string): Promise<void>
   signOut(): Promise<void>
 }
 export interface DownloadControls {
@@ -546,11 +547,32 @@ function Settings({ data, commit, busy, onExport, onRestore, account, downloads 
   </div>
 }
 
-function CloudAccountSettings({ account, commit, busy }: { account: CloudAccountControls; commit: SectionProps['commit']; busy: boolean }) {
+export function CloudAccountSettings({ account, commit, busy }: { account: CloudAccountControls; commit: SectionProps['commit']; busy: boolean }) {
+  const [passwordMessage, setPasswordMessage] = useState('')
+  const [passwordError, setPasswordError] = useState('')
+  const [passwordBusy, setPasswordBusy] = useState(false)
   const share = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const email = String(new FormData(event.currentTarget).get('shareEmail')).trim()
     await commit(() => account.share(email), 'Shared access updated.')
+  }
+  const setPassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const form = event.currentTarget
+    const data = new FormData(form)
+    const password = String(data.get('newPassword'))
+    const confirmPassword = String(data.get('confirmPassword'))
+    form.reset()
+    setPasswordError(''); setPasswordMessage('')
+    if (password !== confirmPassword) { setPasswordError('Passwords do not match.'); return }
+    if (password.length < 6) { setPasswordError('Use at least 6 characters.'); return }
+    setPasswordBusy(true)
+    try {
+      await account.setPassword(password)
+      setPasswordMessage('Password saved for this account.')
+    } catch (error) {
+      setPasswordError(errorMessage(error, 'The password could not be saved. Sign in again and retry.'))
+    } finally { setPasswordBusy(false) }
   }
   return <section className="settings-panel access-panel">
     <div className="settings-panel-heading"><span className="settings-symbol"><LineIcon name="people"/></span><div><h3>Shared access</h3><p className="rates-status">{account.role === 'owner' ? 'Owner' : 'Editor'}</p></div></div>
@@ -559,6 +581,17 @@ function CloudAccountSettings({ account, commit, busy }: { account: CloudAccount
       {account.claimedEmail?<div className="access-person"><span><strong>Shared with</strong><small>{account.claimedEmail}</small></span><button type="button" className="danger compact-action" disabled={busy} onClick={()=>{const userId=account.claimedUserId;if(userId&&confirm(`Remove access for ${account.claimedEmail}?`))void commit(()=>account.removeEditor(userId),'Traveller access removed.')}}>Remove</button></div>:
         <form className="form-card access-form" onSubmit={share}><label className="field">Second traveller’s email<input name="shareEmail" type="email" autoComplete="email" required defaultValue={account.pendingEmail??''}/></label><div className="sharing-actions">{account.pendingEmail&&<button type="button" className="ghost" disabled={busy} onClick={()=>commit(()=>account.revokePending(),'Pending access removed.')}>Revoke</button>}<button className="save" disabled={busy}>Share trip</button></div>{account.pendingEmail&&<p className="caption">Waiting for {account.pendingEmail} to sign in.</p>}</form>}
     </>}
+    <details className="password-settings">
+      <summary>Set or change password</summary>
+      <form className="form-card" onSubmit={setPassword}>
+        <label className="field">New password<input name="newPassword" type="password" autoComplete="new-password" minLength={6} required disabled={busy || passwordBusy}/></label>
+        <label className="field">Confirm password<input name="confirmPassword" type="password" autoComplete="new-password" minLength={6} required disabled={busy || passwordBusy}/></label>
+        <p className="caption">This updates your existing account and keeps its trip access.</p>
+        <button className="save" disabled={busy || passwordBusy}>{passwordBusy ? 'Saving…' : 'Save password'}</button>
+      </form>
+      {passwordMessage && <p className="password-message" role="status">{passwordMessage}</p>}
+      {passwordError && <p className="password-error" role="alert">{passwordError}</p>}
+    </details>
     <button type="button" className="text-action sign-out-action" onClick={()=>account.signOut()} disabled={busy}>Sign out</button>
   </section>
 }

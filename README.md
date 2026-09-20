@@ -105,6 +105,24 @@ email. If Supabase locks template editing behind custom SMTP, that mail setup is
 prerequisite; an app deployment does not change it. Template setup and real-device
 acceptance steps are in `supabase/IOS_SIGN_IN.md`.
 
+## Password sign-in
+
+Existing members can open **Settings → Shared access → Set or change password**.
+This calls Supabase `updateUser` for the currently signed-in account, preserving
+the same user ID, trip membership, RLS access, and downloaded-copy identity.
+It does not create a new account.
+
+Afterward, use the **Password** tab on the sign-in screen. Password login happens
+inside the installed PWA with no email redirect. A first-time invited traveller
+must complete verified email sign-in once so exact-email access can be claimed,
+then set a password. If a password is forgotten, use **Email code / link** and set
+a new password after signing in; no redirect-based password-reset flow is exposed.
+
+Supabase Authentication's **Email** provider must remain enabled. Anonymous sign-in
+must remain disabled: anonymous users have temporary identities without the verified
+email required by this private two-person notebook. The app never calls `signUp` or
+`signInAnonymously`, so enabling password login does not open registration or bypass RLS.
+
 ## Artwork review
 
 With the dev server running, open `/cape-town-travel-notebook/dev/asset-gallery.html` for the shared production artwork gallery. This review entry and its diagnostic fixtures are excluded from the production build and service-worker precache.
