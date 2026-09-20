@@ -1,6 +1,7 @@
 import JSZip from 'jszip'
 import { replaceAll } from './db'
 import { isStampDesign, validateNotebookStampDesigns } from './stampDesign'
+import { isItineraryLink } from './itineraryLink'
 import type { AppData, BackupData, PhotoEntry } from './types'
 
 const photoPath = (photo: Pick<PhotoEntry, 'id' | 'mimeType'>) => `photos/${photo.id}.${photo.mimeType === 'image/png' ? 'png' : photo.mimeType === 'image/webp' ? 'webp' : 'jpg'}`
@@ -26,7 +27,7 @@ function validateRecords(backup: Partial<Omit<BackupData, 'schemaVersion'>>) {
   const checks: Record<(typeof arrays)[number], (value: Record<string, unknown>) => boolean> = {
     checklist: value => isString(value.id) && isString(value.title) && isString(value.category) && isBoolean(value.completed) && isString(value.createdAt) && isString(value.updatedAt),
     days: value => isString(value.id) && isString(value.date) && /^\d{4}-\d{2}-\d{2}$/.test(value.date) && isBoolean(value.outOfRange),
-    items: value => isString(value.id) && isString(value.dayId) && isString(value.placeId) && (value.bookingStatus === undefined || isString(value.bookingStatus)) && isBoolean(value.visited) && isNumber(value.position),
+    items: value => isString(value.id) && isString(value.dayId) && isString(value.placeId) && (value.linkUrl === undefined || isItineraryLink(value.linkUrl)) && (value.bookingStatus === undefined || isString(value.bookingStatus)) && isBoolean(value.visited) && isNumber(value.position),
     places: value => isString(value.id) && isString(value.name) && isBoolean(value.wantToVisit) && isString(value.createdAt) && isString(value.updatedAt),
     activityTemplates: value => isString(value.id) && isString(value.name) && isString(value.description) && Array.isArray(value.stops) && value.stops.every(item => {
       const stop = record(item)

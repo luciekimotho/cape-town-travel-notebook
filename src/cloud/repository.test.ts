@@ -57,7 +57,7 @@ describe('cloud repository', () => {
     const client = {
       rpc:async(name:string,args?:Record<string, unknown>)=>{
         calls.push({name,args})
-        return name === 'mutate_notebook_v2'
+        return name === 'mutate_notebook_v3'
           ? {data:{ok:true,operation:'checklist.toggle',id:'todo-1'},error:null}
           : {data:notebook,error:null}
       },
@@ -65,8 +65,8 @@ describe('cloud repository', () => {
     const result = await new CloudNotebookRepository('trip-1',client).toggleChecklist('todo-1')
     expect(result.acknowledgement).toMatchObject({ok:true,operation:'checklist.toggle'})
     expect(calls).toEqual([
-      {name:'mutate_notebook_v2',args:{p_trip_id:'trip-1',p_operation:'checklist.toggle',p_payload:{id:'todo-1'}}},
-      {name:'load_notebook_v5',args:{p_trip_id:'trip-1'}},
+      {name:'mutate_notebook_v3',args:{p_trip_id:'trip-1',p_operation:'checklist.toggle',p_payload:{id:'todo-1'}}},
+      {name:'load_notebook_v6',args:{p_trip_id:'trip-1'}},
     ])
   })
 
@@ -78,12 +78,37 @@ describe('cloud repository', () => {
     expect(calls).toBe(1)
   })
 
+  it('sends only supported item links and can explicitly clear them', async () => {
+    const calls: Array<{ name:string; args?:Record<string, unknown> }> = []
+    const notebook = {
+      trip:{}, checklist:[], days:[], items:[], places:[], activityTemplates:[], expenses:[], stamps:[],
+      photos:[], rateSets:[], metadata:[],
+    }
+    const client = {
+      rpc:async(name:string,args?:Record<string, unknown>)=>{
+        calls.push({name,args})
+        return name === 'mutate_notebook_v3'
+          ? {data:{ok:true,operation:'itinerary.update',id:'item-1'},error:null}
+          : {data:notebook,error:null}
+      },
+    } as unknown as SupabaseClient
+    const repository = new CloudNotebookRepository('trip-1',client)
+    await repository.updateItinerary('item-1', { linkUrl:'https://www.getyourguide.com/example-t123/' })
+    await repository.updateItinerary('item-1', { linkUrl:undefined })
+    expect(calls.filter(call=>call.name==='mutate_notebook_v3').map(call=>call.args)).toEqual([
+      {p_trip_id:'trip-1',p_operation:'itinerary.update',p_payload:{id:'item-1',patch:{linkUrl:'https://www.getyourguide.com/example-t123/'}}},
+      {p_trip_id:'trip-1',p_operation:'itinerary.update',p_payload:{id:'item-1',patch:{linkUrl:null}}},
+    ])
+    expect(() => repository.updateItinerary('item-1', { linkUrl:'https://example.com/not-allowed' }))
+      .toThrow('GetYourGuide or Google Maps')
+  })
+
   it('reports a committed write when the follow-up reload fails', async () => {
     let calls = 0
     const client = {
       rpc:async(name:string)=>{
         calls++
-        return name === 'mutate_notebook_v2'
+        return name === 'mutate_notebook_v3'
           ? {data:{ok:true,operation:'checklist.delete',id:'todo-1'},error:null}
           : {data:null,error:new Error('network dropped')}
       },
@@ -138,7 +163,7 @@ describe('cloud repository', () => {
     }
     const client = {
       rpc:async(name:string,args:Record<string, unknown>)=>{
-        if (name === 'mutate_notebook_v2') {
+        if (name === 'mutate_notebook_v3') {
           mutationArgs=args
           order.push('replace-metadata')
           return {data:{
@@ -199,7 +224,7 @@ describe('cloud repository', () => {
       photos:[], rateSets:[], metadata:[],
     }
     const client = {
-      rpc:async(name:string)=>name === 'mutate_notebook_v2'
+      rpc:async(name:string)=>name === 'mutate_notebook_v3'
         ? {data:{ok:true,operation:'photo.delete',objectPath:'trip-1/current-version.jpg'},error:null}
         : {data:notebook,error:null},
       storage:{from:()=>({remove:async(paths:string[])=>{removed.push(paths);return {data:[],error:null}}})},
@@ -215,7 +240,7 @@ describe('cloud repository', () => {
     const client = {
       rpc:async(name:string,args:Record<string, unknown>)=>{
         requests.push(args)
-        return name === 'mutate_notebook_v2'
+        return name === 'mutate_notebook_v3'
           ? {data:{ok:true,operation:'collaboration.share'},error:null}
           : {data:{trip:{},photos:[]},error:null}
       },
@@ -242,7 +267,7 @@ describe('cloud repository', () => {
     }
     const client = {
       rpc:async(name:string,args:Record<string, unknown>)=>{
-        if (name === 'restore_notebook_v2') {
+        if (name === 'restore_notebook_v3') {
           order.push('restore-rpc')
           restorePayload=args.p_payload as Record<string, unknown>
           return {data:{ok:true,operation:'notebook.restore',objectPaths:['trip-1/old.jpg'],counts:{photos:1}},error:null}
@@ -279,7 +304,7 @@ describe('cloud repository', () => {
     }
     const client = {
       rpc:async(name:string)=>{
-        if (name === 'restore_notebook_v2') {
+        if (name === 'restore_notebook_v3') {
           attempts++
           return attempts === 1
             ? {data:null,error:new Error('validation failed')}
@@ -342,7 +367,7 @@ describe('cloud repository', () => {
       checklist:[],days:[],items:[],places:[],activityTemplates:[],expenses:[],stamps:[],photos:[],rateSets:[],metadata:[],
     } as AppData
     const client = {
-      rpc:async(name:string)=>name === 'restore_notebook_v2'
+      rpc:async(name:string)=>name === 'restore_notebook_v3'
         ? {data:{ok:true,operation:'notebook.restore',objectPaths:['trip-1/orphan.jpg']},error:null}
         : {data,error:null},
       storage:{from:()=>({remove:async()=>({data:null,error:new Error('Storage unavailable')})})},

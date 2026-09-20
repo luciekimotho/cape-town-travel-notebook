@@ -14,6 +14,7 @@ export interface ItineraryItem {
   templateId?: string
   isActivityGroup?: boolean
   time?: string
+  linkUrl?: string
   notes?: string
   bookingStatus?: BookingStatus
   visited: boolean

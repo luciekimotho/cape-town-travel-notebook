@@ -1,4 +1,4 @@
--- PostgreSQL 17 integration assertions. Run after 0001 -> 0002 -> 0003 -> 0004 in a
+-- PostgreSQL 17 integration assertions. Run after 0001 through 0006 in a
 -- Supabase-compatible test database; the transaction leaves no application data.
 begin;
 do $$
@@ -8,6 +8,7 @@ declare
   v_trip_id constant uuid := '20000000-0000-4000-8000-000000000001';
   payload jsonb;
   result jsonb;
+  legacy jsonb;
 begin
   insert into auth.users(id,email,email_confirmed_at)
   values(owner_id,'owner@example.com',now()),(outsider_id,'outsider@example.com',now());
@@ -64,7 +65,12 @@ begin
     raise exception 'Restore changed trip membership';
   end if;
   result := public.load_notebook_v5(v_trip_id);
-  if public.load_notebook_v4(v_trip_id) <> result then
+  legacy := public.load_notebook_v4(v_trip_id);
+  if legacy#>>'{photos,0,storagePath}' <> payload#>>'{photos,0,storagePath}'
+    or legacy#>>'{places,0,stampKind}' <> 'boat'
+    or legacy#>>'{items,0,stampKind}' <> 'pin'
+    or legacy#>>'{activityTemplates,0,stampKind}' <> 'road'
+    or legacy#>>'{stamps,0,stampKind}' <> 'pin' then
     raise exception 'Legacy read lost designs or private photo metadata';
   end if;
   if result#>>'{photos,0,storagePath}' <> payload#>>'{photos,0,storagePath}'

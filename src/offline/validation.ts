@@ -1,4 +1,5 @@
 import { isStampDesign } from '../stampDesign'
+import { isItineraryLink } from '../itineraryLink'
 import type { AppData, PhotoEntry } from '../types'
 
 export type CloudPhotoMetadata = Omit<PhotoEntry, 'blob'> & { storagePath: string }
@@ -80,6 +81,7 @@ function validate(value: unknown, blobs: boolean, tripId?: string): void {
   const items = rows(root, 'items', {
     id, dayId: id, placeId: id, stampKind, parentId: optional(id), templateId: optional(id),
     isActivityGroup: optional(bool), time: optional(value => typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value)),
+    linkUrl: optional(isItineraryLink),
     notes: optional(text), bookingStatus: optional(oneOf('Idea', 'To book', 'Booked', 'Confirmed', 'Cancelled')),
     visited: bool, position: number, ...timestamps,
   })

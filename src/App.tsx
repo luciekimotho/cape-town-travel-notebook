@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, useRef, useState, type FormEvent, type MutableRefObject, type ReactNode } from 'react'
 import { createBackup, parseBackup } from './backup'
 import { makeId } from './db'
 import { localNotebookStore, type NotebookStore } from './notebookStore'
@@ -10,6 +10,8 @@ import { errorMessage } from './errorMessage'
 import { StampPicker } from './StampPicker'
 import type { StampDesign } from './stampDesign'
 import { DownloadSettings } from './DownloadSettings'
+import { currentItineraryState, millisecondsToNextMinute } from './currentItinerary'
+import { itineraryLinkLabel } from './itineraryLink'
 import type { ActivityTemplate, AppData, BookingStatus, ChecklistItem, Currency, Expense, ItineraryItem, PhotoEntry, Place, RateSet, TravelStamp as Stamp } from './types'
 import './App.css'
 
@@ -27,6 +29,7 @@ const formatTripRange = (start: string, end: string) => {
 }
 const money = (amount: number, currency: Currency) => new Intl.NumberFormat('en-KE', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount)
 const currencies: Currency[] = ['KES', 'USD', 'ZAR']
+const systemClock = () => new Date()
 interface SectionProps { data: AppData; commit: (fn: () => Promise<unknown>, success?: string) => Promise<boolean>; busy: boolean }
 export interface CloudAccountControls {
   email: string
@@ -116,18 +119,19 @@ export default function App() {
   return <NotebookApplication store={localNotebookStore}/>
 }
 
-export function NotebookApplication({ store, account, initialData, readOnly = false, readOnlyReason, downloads }: {
+export function NotebookApplication({ store, account, initialData, readOnly = false, readOnlyReason, downloads, clock = systemClock }: {
   store: NotebookStore
   account?: CloudAccountControls
   initialData?: AppData
   readOnly?: boolean
   readOnlyReason?: string
   downloads?: DownloadControls
+  clock?: () => Date
 }) {
-  return <NotebookStoreContext.Provider value={store}><ReadOnlyContext.Provider value={readOnly || Boolean(store.readOnly)}><NotebookApp account={account} initialData={initialData} downloads={downloads} readOnlyReason={readOnlyReason}/></ReadOnlyContext.Provider></NotebookStoreContext.Provider>
+  return <NotebookStoreContext.Provider value={store}><ReadOnlyContext.Provider value={readOnly || Boolean(store.readOnly)}><NotebookApp account={account} initialData={initialData} downloads={downloads} readOnlyReason={readOnlyReason} clock={clock}/></ReadOnlyContext.Provider></NotebookStoreContext.Provider>
 }
 
-function NotebookApp({ account, initialData, downloads, readOnlyReason }: { account?: CloudAccountControls; initialData?: AppData; downloads?: DownloadControls; readOnlyReason?: string }) {
+function NotebookApp({ account, initialData, downloads, readOnlyReason, clock }: { account?: CloudAccountControls; initialData?: AppData; downloads?: DownloadControls; readOnlyReason?: string; clock: () => Date }) {
   const store = useNotebookStore()
   const readOnly = useReadOnly()
   const readOnlyRef = useRef(readOnly)
@@ -143,6 +147,7 @@ function NotebookApp({ account, initialData, downloads, readOnlyReason }: { acco
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [restoreCandidate, setRestoreCandidate] = useState<AppData>()
   const detailReturnRef = useRef<HTMLElement | null>(null)
+  const itineraryAutoScrollDone = useRef(false)
   const refresh = async () => setData(await store.load())
 
   const showError = (message: string) => { setError(message); setErrorVersion(version => version + 1) }
@@ -211,7 +216,7 @@ function NotebookApp({ account, initialData, downloads, readOnlyReason }: { acco
     {!error && notice && <TransientNotice message={notice} version={noticeVersion} onDismiss={() => setNotice('')}/>}
     {detail ? <ActivityDetail route={detail} data={data} commit={commit} busy={busy} onBack={backFromDetail} onOpenChild={childId => setDetail({ itemId: childId, origin: detail.origin, parentId: detail.itemId })}/> :
       <main className="app-main">
-        {tab === 'itinerary' && <Itinerary data={data} commit={commit} busy={busy} onOpen={(id, parent) => openItem(id, 'itinerary', parent)}/>}
+        {tab === 'itinerary' && <Itinerary data={data} commit={commit} busy={busy} onOpen={(id, parent) => openItem(id, 'itinerary', parent)} clock={clock} autoScrollDone={itineraryAutoScrollDone}/>}
         {tab === 'places' && <Places data={data} commit={commit} busy={busy}/>}
         {tab === 'moments' && <Moments data={data} commit={commit} busy={busy} onOpen={id => openItem(id, 'moments')}/>}
         {tab === 'checklist' && <Checklist data={data} commit={commit} busy={busy}/>}
@@ -234,6 +239,7 @@ interface EntryValues {
   dayId?: string
   parentId?: string
   time?: string
+  linkUrl?: string
   bookingStatus?: BookingStatus
   address?: string
   googleMapsUrl?: string
@@ -261,6 +267,7 @@ function ActivityForm({ data, item, place, expense, defaultDayId, fixedTemplate,
   const [dayId, setDayId] = useState(initialDay)
   const [parentId, setParentId] = useState(item?.parentId ?? '')
   const [name, setName] = useState(place?.name ?? fixedTemplate?.name ?? '')
+  const linkHintId = useId()
   const [stampKind, setStampKind] = useState<StampDesign>(item?.stampKind ?? place?.stampKind ?? fixedTemplate?.stampKind ?? (item || place || fixedTemplate ? 'auto' : 'pin'))
   const hasChildren = Boolean(item && data.items.some(candidate => candidate.parentId === item.id)) || Boolean(fixedTemplate && fixedTemplate.stops.length > 1)
   const eligibleParents = !hasChildren && dayId
@@ -277,6 +284,7 @@ function ActivityForm({ data, item, place, expense, defaultDayId, fixedTemplate,
       dayId: dayId || undefined,
       parentId: parentId || undefined,
       time: String(fd.get('time')) || undefined,
+      linkUrl: String(fd.get('linkUrl') || '').trim() || undefined,
       bookingStatus: (String(fd.get('status')) || undefined) as BookingStatus | undefined,
       address: String(fd.get('address')).trim() || undefined,
       googleMapsUrl: String(fd.get('googleMapsUrl')).trim() || undefined,
@@ -290,6 +298,7 @@ function ActivityForm({ data, item, place, expense, defaultDayId, fixedTemplate,
     <StampPicker name={name} value={stampKind} date={data.days.find(day => day.id === dayId)?.date ?? data.trip.startDate} disabled={busy} onChange={setStampKind}/>
     <label className="field">Parent activity<select name="parentId" value={parentId} disabled={hasChildren} onChange={event => { const next = event.target.value; setParentId(next); if (next) setDayId(data.items.find(candidate => candidate.id === next)?.dayId ?? dayId) }}><option value="">None</option>{eligibleParents.map(parent => <option key={parent.id} value={parent.id}>{data.places.find(candidate => candidate.id === parent.placeId)?.name}</option>)}</select></label>
     <div className="fields-two"><label className="field">Day<select name="dayId" value={dayId} onChange={event => { setDayId(event.target.value); setParentId('') }}><option value="">Unscheduled</option>{data.days.map(day => <option key={day.id} value={day.id}>{formatDate(day.date)}</option>)}</select></label><label className="field">Time<input name="time" type="time" defaultValue={item?.time}/></label></div>
+    {(item || dayId) && <div className="field"><label htmlFor={`${linkHintId}-input`}>Activity or map link</label><input id={`${linkHintId}-input`} name="linkUrl" type="url" inputMode="url" autoCapitalize="none" spellCheck={false} aria-describedby={linkHintId} placeholder="GetYourGuide or Google Maps HTTPS link" defaultValue={item?.linkUrl}/><span id={linkHintId} className="form-hint">GetYourGuide activity or Google Maps area link.</span></div>}
     <div className="fields-two"><label className="field">Cost<input name="cost" type="number" min="0.01" step="0.01" defaultValue={expense?.amount}/></label><label className="field">Currency<select name="currency" defaultValue={expense?.currency ?? 'KES'}>{currencies.map(currency => <option key={currency}>{currency}</option>)}</select></label></div>
     <label className="field">Booking status<select name="status" defaultValue={item?.bookingStatus ?? ''}><option value="">Not set</option>{['Idea','To book','Booked','Confirmed','Cancelled'].map(status => <option key={status}>{status}</option>)}</select></label>
     <label className="field">Address<input name="address" defaultValue={place?.address}/></label>
@@ -299,40 +308,79 @@ function ActivityForm({ data, item, place, expense, defaultDayId, fixedTemplate,
   </form>
 }
 
-function Itinerary({ data, commit, busy, onOpen }: SectionProps & { onOpen: (itemId: string, parentId?: string) => void }) {
+function useMinuteClock(clock: () => Date) {
+  const [now, setNow] = useState(clock)
+  useEffect(() => {
+    let timer = 0
+    const update = () => setNow(clock())
+    const schedule = () => {
+      const delay = millisecondsToNextMinute(clock())
+      timer = window.setTimeout(() => { update(); schedule() }, delay)
+    }
+    const visible = () => { if (document.visibilityState === 'visible') update() }
+    schedule()
+    window.addEventListener('focus', update)
+    document.addEventListener('visibilitychange', visible)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('focus', update)
+      document.removeEventListener('visibilitychange', visible)
+    }
+  }, [clock])
+  return now
+}
+
+function Itinerary({ data, commit, busy, onOpen, clock, autoScrollDone }: SectionProps & {
+  onOpen: (itemId: string, parentId?: string) => void
+  clock: () => Date
+  autoScrollDone: MutableRefObject<boolean>
+}) {
   const store = useNotebookStore()
   const readOnly = useReadOnly()
-  const [openDay, setOpenDay] = useState(data.days.find(day => !day.outOfRange)?.id ?? data.days[0]?.id)
+  const now = useMinuteClock(clock)
+  const current = currentItineraryState(data, now)
+  const [openDay, setOpenDay] = useState(current.dayId ?? data.days.find(day => !day.outOfRange)?.id ?? data.days[0]?.id)
   const [editorOpen, setEditorOpen] = useState(false)
+  const currentCard = useRef<HTMLElement | null>(null)
   const day = data.days.find(candidate => candidate.id === openDay)
   const dayItems = data.items.filter(item => item.dayId === openDay)
   const roots = dayItems.filter(item => !item.parentId).sort((a,b) => a.position-b.position)
+  useEffect(() => {
+    if (autoScrollDone.current) return
+    autoScrollDone.current = true
+    if (!current.itemId || current.dayId !== openDay) return
+    const frame = window.requestAnimationFrame(() => {
+      const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+      currentCard.current?.scrollIntoView({ block:'center', behavior:reduced ? 'auto' : 'smooth' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [autoScrollDone, current.dayId, current.itemId, openDay])
   const add = async (values: EntryValues) => {
     if (!values.dayId) return commit(() => Promise.reject(new Error('Choose a day for this activity.')))
     const now = timestamp()
     const place: Place = { id:makeId(), name:values.name, stampKind:values.stampKind, address:values.address, googleMapsUrl:values.googleMapsUrl, notes:values.notes, wantToVisit:false, createdAt:now, updatedAt:now }
-    const item: ItineraryItem = { id:makeId(), dayId:values.dayId, placeId:place.id, stampKind:values.stampKind, parentId:values.parentId, time:values.time, bookingStatus:values.bookingStatus, notes:values.notes, visited:false, position:Date.now(), createdAt:now, updatedAt:now }
+    const item: ItineraryItem = { id:makeId(), dayId:values.dayId, placeId:place.id, stampKind:values.stampKind, parentId:values.parentId, time:values.time, linkUrl:values.linkUrl, bookingStatus:values.bookingStatus, notes:values.notes, visited:false, position:Date.now(), createdAt:now, updatedAt:now }
     const saved = await commit(() => store.createItineraryPlace(place, item, values.cost))
     if (saved) { setOpenDay(values.dayId); setEditorOpen(false) }
     return saved
   }
   return <section className="page">
     <div className="section-row"><h2>Itinerary</h2><button className="icon-button add-button" aria-label="Add activity" disabled={readOnly} onClick={() => setEditorOpen(true)}>+</button></div>
-    <div className="day-rail" aria-label="Trip days">{data.days.map((candidate, index) => <button key={candidate.id} className={`day ${candidate.id === openDay ? 'active' : ''} ${candidate.outOfRange ? 'flagged' : ''}`} style={{ '--day-accent': ['#008c95','#bc3557','#b57e0b','#2855a6','#4e8548'][index % 5] } as React.CSSProperties} aria-pressed={candidate.id === openDay} onClick={() => setOpenDay(candidate.id)}><span>{formatDate(candidate.date).slice(0,1)}</span><strong>{candidate.date.slice(-2)}</strong></button>)}</div>
+    <div className="day-rail" aria-label="Trip days">{data.days.map((candidate, index) => <button key={candidate.id} className={`day ${candidate.id === openDay ? 'active' : ''} ${candidate.outOfRange ? 'flagged' : ''}`} style={{ '--day-accent': ['#008c95','#bc3557','#b57e0b','#2855a6','#4e8548'][index % 5] } as React.CSSProperties} aria-pressed={candidate.id === openDay} onClick={() => { autoScrollDone.current = true; setOpenDay(candidate.id) }}><span>{formatDate(candidate.date).slice(0,1)}</span><strong>{candidate.date.slice(-2)}</strong></button>)}</div>
     {day?.outOfRange && <p className="warning">Outside current trip dates.</p>}
     {day && <div className="day-summary"><h3>{new Intl.DateTimeFormat('en-KE',{weekday:'long',day:'numeric',month:'short',timeZone:'UTC'}).format(new Date(`${day.date}T12:00:00Z`))}</h3><span>{roots.length} {roots.length === 1 ? 'activity' : 'activities'}</span></div>}
-    {roots.map(item => <ItineraryCard key={item.id} item={item} data={data} onOpen={onOpen}/>)}
+    {roots.map(item => <ItineraryCard key={item.id} item={item} data={data} onOpen={onOpen} current={item.id === current.itemId} cardRef={item.id === current.itemId ? node => { currentCard.current = node } : undefined}/>)}
     {!roots.length && <div className="empty-day"><EmptyDayArt/><h3>A little room to explore.</h3></div>}
     <Sheet open={editorOpen} title="Add activity" onClose={() => setEditorOpen(false)}><ActivityForm data={data} defaultDayId={day?.id} busy={busy} onSave={add}/></Sheet>
   </section>
 }
 
-function ItineraryCard({ item, data, onOpen }: { item: ItineraryItem; data: AppData; onOpen: (itemId: string, parentId?: string) => void }) {
+function ItineraryCard({ item, data, onOpen, current = false, cardRef }: { item: ItineraryItem; data: AppData; onOpen: (itemId: string, parentId?: string) => void; current?: boolean; cardRef?: (node: HTMLElement | null) => void }) {
   const place = data.places.find(candidate => candidate.id === item.placeId)!
   const children = data.items.filter(candidate => candidate.parentId === item.id).sort((a,b) => a.position-b.position)
   const stamp = data.stamps.find(candidate => candidate.itineraryItemId === item.id)
   const expense = data.expenses.find(candidate => candidate.itineraryItemId === item.id)
-  const heading = <button className="activity-card" onClick={() => onOpen(item.id)}><span className="thumb"><PlaceThumbnail name={place.name}/></span><span className="card-copy"><h3>{place.name}</h3>{children.length > 0 && <small>{children.length} stops · {children.filter(child => child.visited).length} stamped</small>}{item.time && <small>{item.time}</small>}{expense && <small className="cost-pill">{money(expense.amount, expense.currency)}</small>}</span>{stamp ? <span className="mini-stamp"><TravelStamp name={place.name} date={stamp.visitDate} stampKind={stamp.stampKind}/></span> : <span className="chevron" aria-hidden="true">›</span>}</button>
+  const heading = <button ref={cardRef} className={`activity-card ${current ? 'current-activity' : ''}`} aria-current={current ? 'time' : undefined} onClick={() => onOpen(item.id)}><span className="thumb"><PlaceThumbnail name={place.name}/>{item.time && <time className="activity-time" dateTime={item.time}>{item.time}</time>}</span><span className="card-copy">{current && <span className="now-pill">Now</span>}<h3>{place.name}</h3>{children.length > 0 && <small>{children.length} stops · {children.filter(child => child.visited).length} stamped</small>}{expense && <small className="cost-pill">{money(expense.amount,expense.currency)}</small>}</span>{stamp ? <span className="mini-stamp"><TravelStamp name={place.name} date={stamp.visitDate} stampKind={stamp.stampKind}/></span> : <span className="chevron" aria-hidden="true">›</span>}</button>
   if (!children.length) return heading
   return <article className="tour-card">{heading}<div className="route-list compact-route" role="group" aria-label={`${place.name} stops`}>{children.map(child => <RouteRow key={child.id} item={child} data={data} compact onOpen={() => onOpen(child.id)}/>)}</div></article>
 }
@@ -341,7 +389,7 @@ function RouteRow({ item, data, compact, onOpen }: { item: ItineraryItem; data: 
   const place = data.places.find(candidate => candidate.id === item.placeId)!
   const stamp = data.stamps.find(candidate => candidate.itineraryItemId === item.id)
   const kind = artKindFor(place.name)
-  return <button className={`route-row ${compact ? 'compact' : ''}`} style={{ '--place-color': colorForKind(kind) } as React.CSSProperties} onClick={onOpen}><span className={`stop-number ${stamp ? 'is-stamped' : ''}`}>{stamp ? <TravelStamp name={place.name} date={stamp.visitDate} stampKind={stamp.stampKind}/> : <MarkerIcon kind={kind}/>}</span><span className="stop-copy">{place.name}{item.notes && <small>{item.notes}</small>}</span><span className="chevron" aria-hidden="true">›</span></button>
+  return <button className={`route-row ${compact ? 'compact' : ''}`} style={{ '--place-color': colorForKind(kind) } as React.CSSProperties} onClick={onOpen}><span className={`stop-number ${stamp ? 'is-stamped' : ''}`}>{stamp ? <TravelStamp name={place.name} date={stamp.visitDate} stampKind={stamp.stampKind}/> : <MarkerIcon kind={kind}/>} {item.time && <time className="route-time" dateTime={item.time}>{item.time}</time>}</span><span className="stop-copy">{place.name}{item.notes && <small>{item.notes}</small>}</span><span className="chevron" aria-hidden="true">›</span></button>
 }
 
 function ActivityDetail({ route, data, commit, busy, onBack, onOpenChild }: { route: DetailRoute; data: AppData; commit: SectionProps['commit']; busy: boolean; onBack: () => void; onOpenChild: (id: string) => void }) {
@@ -375,7 +423,7 @@ function ActivityDetail({ route, data, commit, busy, onBack, onOpenChild }: { ro
     if (!values.dayId) return commit(() => Promise.reject(new Error('Choose a day for this activity.')))
     if (expense && !values.cost && !confirm('Remove this recorded expense?')) return false
     const saved = await commit(() => store.saveItineraryDetails(item.id, {
-      name:values.name, stampKind:values.stampKind, dayId:values.dayId, parentId:values.parentId, time:values.time, bookingStatus:values.bookingStatus,
+      name:values.name, stampKind:values.stampKind, dayId:values.dayId, parentId:values.parentId, time:values.time, linkUrl:values.linkUrl, bookingStatus:values.bookingStatus,
       notes:values.notes, address:values.address, googleMapsUrl:values.googleMapsUrl,
     }, values.cost ?? (expense ? null : undefined)))
     if (saved) setEditorOpen(false)
@@ -393,7 +441,7 @@ function ActivityDetail({ route, data, commit, busy, onBack, onOpenChild }: { ro
       <div className="hero"><PlaceScene name={place.name}/>{stamp && <div className={`hero-stamp ${justStamped ? 'stamp-pop' : ''}`}><TravelStamp name={place.name} date={stamp.visitDate} stampKind={stamp.stampKind}/></div>}</div>
       <div className="detail-title"><h1 ref={headingRef} tabIndex={-1}>{place.name}</h1><p>{formatDate(day.date, false)}{item.time ? ` · ${item.time}` : ''}{children.length ? ` · ${children.length} stops` : ''}{item.bookingStatus ? ` · ${item.bookingStatus}` : ''}</p></div>
       {stamp ? <div className="stamped-line"><button disabled={readOnly} onClick={toggleStamp}>Undo stamp</button></div> : <button className="stamp-action" disabled={readOnly} onClick={toggleStamp}><LineIcon name="moments"/>Stamp this visit</button>}
-      {(place.address || place.googleMapsUrl || item.notes) && <section className="detail-section specifics">{place.address && <p>{place.address}</p>}{item.notes && <p>{item.notes}</p>}{place.googleMapsUrl && (readOnly ? <p className="caption">Google Maps needs the live connection.</p> : <a href={place.googleMapsUrl} target="_blank" rel="noreferrer">Open in Google Maps</a>)}</section>}
+      {(place.address || place.googleMapsUrl || item.linkUrl || item.notes) && <section className="detail-section specifics">{place.address && <p>{place.address}</p>}{item.notes && <p>{item.notes}</p>}{item.linkUrl && (readOnly ? <p className="caption">{itineraryLinkLabel(item.linkUrl)} needs the live connection.</p> : <a href={item.linkUrl} target="_blank" rel="noreferrer">{itineraryLinkLabel(item.linkUrl)}</a>)}{place.googleMapsUrl && place.googleMapsUrl !== item.linkUrl && (readOnly ? <p className="caption">Google Maps needs the live connection.</p> : <a href={place.googleMapsUrl} target="_blank" rel="noreferrer">Open in Google Maps</a>)}</section>}
       {children.length > 0 && <section className="detail-section"><div className="route-list" role="group" aria-label={`${place.name} stops`}>{children.map(child => <RouteRow key={child.id} item={child} data={data} onOpen={() => onOpenChild(child.id)}/>)}</div></section>}
       <section className="detail-section"><div className="detail-heading"><h2>Moments</h2>{stamp && <button className="text-action" disabled={readOnly} onClick={() => setPhotoOpen(true)}>{photo ? 'Edit' : '+ Add'}</button>}</div>{photo ? <><PhotoImage photo={photo} alt={photo.caption || place.name} className="memory-image"/>{photo.caption && <p className="caption">{photo.caption}</p>}</> : stamp ? <button className="photo-placeholder" disabled={readOnly} onClick={() => setPhotoOpen(true)}><LineIcon name="camera"/>Add a photo</button> : <p className="small-label">{readOnly ? 'No saved photo for this activity.' : 'Stamp your visit to add a photo.'}</p>}</section>
       <section className="detail-section"><div className="detail-heading"><h2>Cost</h2><button className="text-action" disabled={readOnly} onClick={() => setEditorOpen(true)}>{expense ? 'Edit' : '+ Add'}</button></div>{expense && <div className="expense-row"><strong>{money(expense.amount,expense.currency)}</strong></div>}</section>
@@ -459,7 +507,7 @@ function Places({ data, commit, busy }: SectionProps) {
     if (!placeEditor) {
       if (values.dayId) {
         const place: Place={id:makeId(),name:values.name,stampKind:values.stampKind,address:values.address,googleMapsUrl:values.googleMapsUrl,notes:values.notes,wantToVisit:false,createdAt:now,updatedAt:now}
-        const item: ItineraryItem={id:makeId(),dayId:values.dayId,placeId:place.id,stampKind:values.stampKind,parentId:values.parentId,time:values.time,bookingStatus:values.bookingStatus,notes:values.notes,visited:false,position:Date.now(),createdAt:now,updatedAt:now}
+        const item: ItineraryItem={id:makeId(),dayId:values.dayId,placeId:place.id,stampKind:values.stampKind,parentId:values.parentId,time:values.time,linkUrl:values.linkUrl,bookingStatus:values.bookingStatus,notes:values.notes,visited:false,position:Date.now(),createdAt:now,updatedAt:now}
         const saved=await commit(()=>store.createItineraryPlace(place,item,values.cost));if(saved)setAdding(false);return saved
       }
       const saved=await commit(()=>store.addPlace({id:makeId(),name:values.name,stampKind:values.stampKind,address:values.address,googleMapsUrl:values.googleMapsUrl,notes:values.notes,wantToVisit:true,createdAt:now,updatedAt:now}));if(saved)setAdding(false);return saved
@@ -485,7 +533,7 @@ function Places({ data, commit, busy }: SectionProps) {
       return saved
     }
     const dayId = values.dayId
-    const saved=await commit(()=>store.materializeTemplate(currentTemplate,dayId,values.cost,{name:values.name,stampKind:values.stampKind,time:values.time,bookingStatus:values.bookingStatus,address:values.address,googleMapsUrl:values.googleMapsUrl,notes:values.notes,parentId:values.parentId}))
+    const saved=await commit(()=>store.materializeTemplate(currentTemplate,dayId,values.cost,{name:values.name,stampKind:values.stampKind,time:values.time,linkUrl:values.linkUrl,bookingStatus:values.bookingStatus,address:values.address,googleMapsUrl:values.googleMapsUrl,notes:values.notes,parentId:values.parentId}))
     if(saved)setTemplate(undefined)
     return saved
   }

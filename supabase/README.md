@@ -1,6 +1,6 @@
 # Supabase setup
 
-The complete cloud setup uses four Dashboard-ready SQL files:
+The complete cloud setup uses five application migrations plus two reviewed user-data updates:
 
 | Migration | Contents |
 | --- | --- |
@@ -8,6 +8,9 @@ The complete cloud setup uses four Dashboard-ready SQL files:
 | `0002_cloud_app.sql` | Additive grouped bootstrap, transactional app mutations, collaboration controls, safe photo replacement, and owner-only validated ZIP restore |
 | `0003_fix_itinerary_edit.sql` | Schema-qualifies the deferred parent constraint so editing activities works with the RPC's restricted search path; changes no trip data |
 | `0004_stamp_designs.sql` | Optional validated stamp designs, live/detached snapshots, design-aware read/mutation/restore RPCs; leaves existing choices automatic |
+| `0005_confirmed_reservations.sql` | One-time, fail-safe update for the supplied confirmed flights and Hyatt stay; excludes passenger, ticket, seat and booking identifiers |
+| `0006_itinerary_links.sql` | Provider-restricted GetYourGuide/Google Maps links on itinerary items, including read/mutation/restore RPC support |
+| `0007_itinerary_link_data.sql` | Reviewed product links on tour groups and Google Maps area links on relevant personal itinerary stops |
 
 Apply `migrations/0001_setup.sql` through the normal migration runner (for example,
 `supabase db push`) after confirming the target Supabase project. Then apply
@@ -24,6 +27,9 @@ For Dashboard-only setup:
 2. Open another new query, paste `migrations/0002_cloud_app.sql`, and run it once.
    Then run `migrations/0003_fix_itinerary_edit.sql` in a new query.
    Finally run the complete `migrations/0004_stamp_designs.sql` in another new query.
+   Run `migrations/0005_confirmed_reservations.sql` only for the intended personal notebook after reviewing its confirmed travel details.
+   Then run `migrations/0006_itinerary_links.sql`, followed by the personal
+   `migrations/0007_itinerary_link_data.sql`.
 3. Configure the Authentication Site URL and Redirect URLs for the deployed and local app.
 4. Keep passwordless email sign-in enabled.
 5. Verify the `trip-photos` Storage bucket exists and is private.

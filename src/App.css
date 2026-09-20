@@ -134,6 +134,7 @@ svg { display: block; }
 .day-summary span { color: var(--muted); font-size: 11px; }
 
 .activity-card {
+  position: relative;
   width: 100%;
   min-height: 106px;
   display: flex;
@@ -148,8 +149,54 @@ svg { display: block; }
   text-align: left;
 }
 .activity-card:hover { border-color: #8caba2; background: #fffdf6; }
-.thumb { width: 70px; height: 76px; flex-shrink: 0; overflow: hidden; background: #dce9e1; border-radius: 10px; }
+.activity-card.current-activity {
+  border-color: #d49a49;
+  background: #fff8e7;
+  box-shadow: inset 4px 0 0 var(--coral), 0 5px 16px #bc355713;
+}
+.now-pill {
+  position: absolute;
+  z-index: 2;
+  top: 7px;
+  left: 7px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  color: #fffaf0;
+  background: var(--pink);
+  border: 2px solid #fffaf0;
+  border-radius: 999px;
+  font: 800 9px/1 "Avenir Next","Trebuchet MS",sans-serif;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  box-shadow: 0 1px 0 #28262a22;
+}
+.thumb { position: relative; width: 70px; height: 76px; flex-shrink: 0; overflow: hidden; background: #dce9e1; border-radius: 10px; }
 .thumb .place-thumbnail { display: block; width: 100%; height: 100%; background: #fff4de; }
+.activity-time, .route-time {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: 750 10px/1 "Avenir Next","Trebuchet MS",sans-serif;
+  letter-spacing: .04em;
+}
+.activity-time {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  min-height: 21px;
+  padding: 3px 5px;
+  color: var(--muted);
+  background: #fff4def0;
+  border-top: 1px solid #d8c8aa;
+}
+.current-activity .activity-time {
+  color: #fffaf0;
+  background: var(--pink);
+  border-top-color: #fffaf0;
+}
 .card-copy { min-width: 0; flex: 1; }
 .card-copy h3 { font-size: 20px; line-height: 1.16; overflow-wrap: anywhere; }
 .card-copy small { display: block; margin-top: 7px; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -160,6 +207,7 @@ svg { display: block; }
 
 .tour-card { margin-bottom: 12px; padding: 0 12px 9px; overflow: hidden; background: var(--paper-card); border: 1px solid var(--line); border-radius: 16px; }
 .tour-card > .activity-card { min-height: 80px; margin: 0; padding: 12px 0; background: none; border: 0; border-radius: 0; }
+.tour-card > .activity-card.current-activity { margin: 0 -8px; width: calc(100% + 16px); padding-inline: 8px; background: #fff8e7; border-radius: 11px; }
 .tour-card > .activity-card .thumb { width: 54px; height: 54px; }
 .tour-card > .activity-card h3 { font-size: 21px; }
 .route-list { padding-top: 8px; }
@@ -186,6 +234,19 @@ svg { display: block; }
 .stop-number > svg { width: 30px; height: 30px; color: var(--place-color); }
 .stop-number.is-stamped::before { display: none; }
 .stop-number.is-stamped > svg { width: 68px; height: 68px; transform: rotate(-10deg); }
+.route-time {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  bottom: -7px;
+  transform: translateX(-50%);
+  min-height: 18px;
+  padding: 2px 5px;
+  color: var(--muted);
+  background: var(--paper-card);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
 .stop-copy { min-width: 0; flex: 1; font: 18px/1.25 var(--display); overflow-wrap: anywhere; }
 .stop-copy small { display: block; margin-top: 7px; color: var(--muted); font: 12px/1.5 "Avenir Next","Trebuchet MS",sans-serif; }
 .route-row.compact { min-height: 66px; gap: 10px; padding: 6px 0; }
@@ -194,6 +255,7 @@ svg { display: block; }
 .route-row.compact .stop-number::before { inset: 7px; border-width: 1.5px; box-shadow: none; }
 .route-row.compact .stop-number > svg { width: 21px; height: 21px; }
 .route-row.compact .stop-number.is-stamped > svg { width: 49px; height: 49px; }
+.route-row.compact .route-time { bottom: -7px; }
 .route-row.compact .stop-copy { font-size: 16px; }
 .route-row.compact .stop-copy small { display: -webkit-box; margin-top: 3px; overflow: hidden; font-size: 11px; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
 

@@ -18,7 +18,7 @@ describe('cloud stamp design protocol', () => {
   it('loads all optional choices through the design-aware RPC', async () => {
     const rpc = vi.fn(async () => ({ data:notebook, error:null }))
     expect(await loadCloudNotebook('trip', { rpc } as unknown as SupabaseClient)).toEqual(notebook)
-    expect(rpc).toHaveBeenCalledWith('load_notebook_v5', { p_trip_id:'trip' })
+    expect(rpc).toHaveBeenCalledWith('load_notebook_v6', { p_trip_id:'trip' })
   })
 
   it.each(['places', 'items', 'activityTemplates', 'stamps'] as const)('rejects invalid cloud %s choices', async key => {
@@ -31,7 +31,7 @@ describe('cloud stamp design protocol', () => {
     const calls: Array<{ operation:unknown; payload:unknown }> = []
     const client = {
       rpc:async (name:string, args?:Record<string, unknown>) => {
-        if (name === 'load_notebook_v5') return { data:notebook, error:null }
+        if (name === 'load_notebook_v6') return { data:notebook, error:null }
         calls.push({ operation:args?.p_operation, payload:args?.p_payload })
         return { data:{ ok:true, operation:args?.p_operation }, error:null }
       },
@@ -61,8 +61,8 @@ describe('cloud stamp design protocol', () => {
     let payload: unknown
     const client = {
       rpc:async (name:string, args?:Record<string, unknown>) => {
-        if (name === 'load_notebook_v5') return { data:notebook, error:null }
-        expect(name).toBe('restore_notebook_v2')
+        if (name === 'load_notebook_v6') return { data:notebook, error:null }
+        expect(name).toBe('restore_notebook_v3')
         payload = args?.p_payload
         return { data:{ ok:true, operation:'notebook.restore', objectPaths:[] }, error:null }
       },
@@ -76,9 +76,9 @@ describe('cloud stamp design protocol', () => {
     const rpc = vi.fn(async () => ({ data:null, error:{ code:'PGRST202', message:'Missing function' } }))
     const client = { rpc, storage:{ from:() => ({}) } } as unknown as SupabaseClient
     const repository = new CloudNotebookRepository('trip', client)
-    await expect(repository.load()).rejects.toThrow('0004_stamp_designs.sql')
-    await expect(repository.updatePlace('place', { stampKind:'pin' })).rejects.toThrow('0004_stamp_designs.sql')
-    await expect(repository.restoreNotebook(notebook)).rejects.toThrow('0004_stamp_designs.sql')
+    await expect(repository.load()).rejects.toThrow('0006_itinerary_links.sql')
+    await expect(repository.updatePlace('place', { stampKind:'pin' })).rejects.toThrow('0006_itinerary_links.sql')
+    await expect(repository.restoreNotebook(notebook)).rejects.toThrow('0006_itinerary_links.sql')
     expect(rpc).toHaveBeenCalledTimes(3)
   })
 })

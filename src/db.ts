@@ -1,5 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie'
 import { validateNotebookStampDesigns, validateStampDesign } from './stampDesign'
+import { normalizeItineraryLink } from './itineraryLink'
 import type { ActivityTemplate, AppData, AppMetadata, ChecklistItem, Currency, Expense, ItineraryDay, ItineraryItem, PhotoEntry, Place, RateSet, TravelStamp, Trip } from './types'
 
 const now = () => new Date().toISOString()
@@ -252,14 +253,14 @@ export interface LinkedCostInput {
   note?: string
 }
 
-export type ItineraryDetailsPatch = Partial<Pick<ItineraryItem, 'stampKind' | 'dayId' | 'parentId' | 'time' | 'notes' | 'bookingStatus' | 'visited' | 'position'>> & {
+export type ItineraryDetailsPatch = Partial<Pick<ItineraryItem, 'stampKind' | 'dayId' | 'parentId' | 'time' | 'linkUrl' | 'notes' | 'bookingStatus' | 'visited' | 'position'>> & {
   name?: string
   address?: string
   googleMapsUrl?: string
 }
 
 type PlaceDetailsPatch = Partial<Pick<Place, 'stampKind' | 'name' | 'address' | 'googleMapsUrl' | 'notes'>>
-type ScheduledItemPatch = Partial<Pick<ItineraryItem, 'stampKind' | 'parentId' | 'time' | 'bookingStatus' | 'notes'>>
+type ScheduledItemPatch = Partial<Pick<ItineraryItem, 'stampKind' | 'parentId' | 'time' | 'linkUrl' | 'bookingStatus' | 'notes'>>
 type MaterializeDetails = PlaceDetailsPatch & ScheduledItemPatch
 
 const currencies: readonly Currency[] = ['KES', 'USD', 'ZAR']
@@ -308,6 +309,7 @@ async function updateParentGroupFlags(oldParentId: string | undefined, newParent
 export async function createItineraryPlace(place: Place, item: ItineraryItem, cost?: LinkedCostInput): Promise<ItineraryItem> {
   validateStampDesign(place.stampKind)
   validateStampDesign(item.stampKind)
+  item.linkUrl = normalizeItineraryLink(item.linkUrl)
   await db.transaction('rw', [db.places, db.items, db.expenses, db.days, db.rateSets], async () => {
     if (!await db.days.get(item.dayId)) throw new Error('The itinerary day does not exist.')
     if (item.parentId) await validateParentAssignment(item.id, item.dayId, item.parentId)
@@ -323,7 +325,7 @@ export async function scheduleCandidatePlace(placeId: string, dayId: string, cos
   validateStampDesign(placePatch?.stampKind)
   validateStampDesign(itemPatch?.stampKind)
   const createdAt = now()
-  const item: ItineraryItem = { id: makeId(), dayId, placeId, ...itemPatch, visited: false, position: Date.now(), createdAt, updatedAt: createdAt }
+  const item: ItineraryItem = { id: makeId(), dayId, placeId, ...itemPatch, linkUrl: normalizeItineraryLink(itemPatch?.linkUrl), visited: false, position: Date.now(), createdAt, updatedAt: createdAt }
   await db.transaction('rw', [db.places, db.items, db.stamps, db.expenses, db.days, db.rateSets], async () => {
     const place = await db.places.get(placeId)
     if (!place) throw new Error('The place does not exist.')
@@ -340,6 +342,7 @@ export async function scheduleCandidatePlace(placeId: string, dayId: string, cos
 
 export async function saveItineraryDetails(itemId: string, patch: ItineraryDetailsPatch, linkedCost: LinkedCostInput | null | undefined): Promise<void> {
   validateStampDesign(patch.stampKind)
+  if ('linkUrl' in patch) patch.linkUrl = normalizeItineraryLink(patch.linkUrl)
   await db.transaction('rw', [db.items, db.places, db.stamps, db.expenses, db.days, db.rateSets], async () => {
     const item = await db.items.get(itemId)
     if (!item) throw new Error('The itinerary item does not exist.')
@@ -409,6 +412,7 @@ export async function deleteItineraryItem(id: string) {
 export async function materializeTemplate(template: ActivityTemplate, dayId: string, cost?: LinkedCostInput, details?: MaterializeDetails): Promise<ItineraryItem> {
   validateStampDesign(template.stampKind)
   validateStampDesign(details?.stampKind)
+  if (details && 'linkUrl' in details) details.linkUrl = normalizeItineraryLink(details.linkUrl)
   let createdItem!: ItineraryItem
   await db.transaction('rw', [db.places, db.items, db.expenses, db.days, db.rateSets], async () => {
     const createdAt = now()
@@ -435,7 +439,7 @@ export async function materializeTemplate(template: ActivityTemplate, dayId: str
         }
         await db.places.add(place)
       }
-      createdItem = { id: makeId(), dayId, placeId: place.id, templateId: template.id, stampKind: details?.stampKind ?? template.stampKind, parentId: details?.parentId, time: details?.time, bookingStatus: details?.bookingStatus, notes: details?.notes ?? (stop.notes.join(' · ') || undefined), visited: false, position: Date.now(), createdAt, updatedAt: createdAt }
+      createdItem = { id: makeId(), dayId, placeId: place.id, templateId: template.id, stampKind: details?.stampKind ?? template.stampKind, parentId: details?.parentId, time: details?.time, linkUrl: details?.linkUrl, bookingStatus: details?.bookingStatus, notes: details?.notes ?? (stop.notes.join(' · ') || undefined), visited: false, position: Date.now(), createdAt, updatedAt: createdAt }
       if (createdItem.parentId) await validateParentAssignment(createdItem.id, dayId, createdItem.parentId)
       await db.items.add(createdItem)
       if (createdItem.parentId) await db.items.update(createdItem.parentId, { isActivityGroup: true, updatedAt: createdAt })
@@ -450,7 +454,7 @@ export async function materializeTemplate(template: ActivityTemplate, dayId: str
     const parent: ItineraryItem = {
       id: makeId(), dayId, placeId: groupPlace.id, templateId: template.id, isActivityGroup: true,
       stampKind: details?.stampKind ?? template.stampKind,
-      time: details?.time, bookingStatus: details?.bookingStatus, notes: details?.notes,
+      time: details?.time, linkUrl: details?.linkUrl, bookingStatus: details?.bookingStatus, notes: details?.notes,
       visited: false, position: Date.now(), createdAt, updatedAt: createdAt,
     }
     await db.places.add(groupPlace)

@@ -3,6 +3,7 @@ import type {
   ActivityTemplate, AppData, ChecklistItem, Currency, Expense, ItineraryItem, PhotoEntry, Place, RateSet, Trip,
 } from '../types'
 import { getCloudClient } from './client'
+import { normalizeItineraryLink } from '../itineraryLink'
 import { validateNotebookStampDesigns } from '../stampDesign'
 
 export interface CloudTripSummary {
@@ -36,7 +37,7 @@ export interface LinkedCostInput {
 }
 
 export type ItineraryPatch = Partial<Pick<ItineraryItem,
-  'stampKind' | 'dayId' | 'parentId' | 'time' | 'notes' | 'bookingStatus' | 'position'>> & {
+  'stampKind' | 'dayId' | 'parentId' | 'time' | 'linkUrl' | 'notes' | 'bookingStatus' | 'position'>> & {
   name?: string
   address?: string
   googleMapsUrl?: string
@@ -48,6 +49,7 @@ export interface PlacePatch extends Partial<Pick<Place,
 export interface MaterializeDetails extends PlacePatch {
   parentId?: string
   time?: string
+  linkUrl?: string
   bookingStatus?: ItineraryItem['bookingStatus']
 }
 
@@ -110,7 +112,7 @@ export async function createFreshTrip(client: SupabaseClient = getCloudClient())
 }
 
 export async function loadCloudNotebook(tripId: string, client: SupabaseClient = getCloudClient()): Promise<CloudAppData> {
-  const { data, error } = await client.rpc('load_notebook_v5', { p_trip_id: tripId })
+  const { data, error } = await client.rpc('load_notebook_v6', { p_trip_id: tripId })
   if (error) throw cloudSchemaError(error)
   if (!data || typeof data !== 'object') throw new Error('The server returned an invalid notebook.')
   const notebook = data as Omit<AppData, 'photos'> & {
@@ -134,7 +136,7 @@ const clean = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
 function cloudSchemaError(error: { code?: string; message: string }): Error | typeof error {
   if (error.code === 'PGRST202' || error.code === '42883') {
-    return new Error('Cloud stamp designs require migration 0004_stamp_designs.sql. Apply it in Supabase SQL Editor, then reload.')
+    return new Error('Cloud itinerary features require migrations 0004_stamp_designs.sql and 0006_itinerary_links.sql. Apply them in Supabase SQL Editor, then reload.')
   }
   return error
 }
@@ -164,7 +166,7 @@ export class CloudNotebookRepository {
   }
 
   private async write(operation: string, payload: Record<string, unknown> = {}): Promise<MutationResult> {
-    const { data, error } = await this.client.rpc('mutate_notebook_v2', {
+    const { data, error } = await this.client.rpc('mutate_notebook_v3', {
       p_trip_id: this.tripId,
       p_operation: operation,
       p_payload: clean(payload),
@@ -191,8 +193,9 @@ export class CloudNotebookRepository {
   updatePlace(id: string, patch: PlacePatch) { return this.write('place.update', { id, patch }) }
   deletePlace(id: string) { return this.write('place.delete', { id }) }
   scheduleWishlistPlace(placeId: string, dayId: string, cost?: LinkedCostInput, placePatch?: PlacePatch,
-    itemPatch?: Partial<Pick<ItineraryItem, 'stampKind' | 'parentId' | 'time' | 'bookingStatus' | 'notes'>>) {
-    return this.write('place.schedule', { placeId, dayId, cost, placePatch, itemPatch })
+    itemPatch?: Partial<Pick<ItineraryItem, 'stampKind' | 'parentId' | 'time' | 'linkUrl' | 'bookingStatus' | 'notes'>>) {
+    return this.write('place.schedule', { placeId, dayId, cost, placePatch,
+      itemPatch:itemPatch ? { ...itemPatch, linkUrl:normalizeItineraryLink(itemPatch.linkUrl) } : undefined })
   }
 
   updateActivityTemplate(id: string, patch: Partial<Pick<ActivityTemplate, 'stampKind' | 'name' | 'description' | 'stops'>>) {
@@ -200,14 +203,19 @@ export class CloudNotebookRepository {
   }
   deleteActivityTemplate(id: string) { return this.write('template.delete', { id }) }
   materializeActivityTemplate(templateId: string, dayId: string, cost?: LinkedCostInput, details?: MaterializeDetails) {
-    return this.write('template.materialize', { templateId, dayId, cost, details })
+    return this.write('template.materialize', { templateId, dayId, cost,
+      details:details ? { ...details, linkUrl:normalizeItineraryLink(details.linkUrl) } : undefined })
   }
 
   createItinerary(place: Place, item: ItineraryItem, cost?: LinkedCostInput) {
-    return this.write('itinerary.create', { place, item, cost })
+    return this.write('itinerary.create', { place, item:{ ...item, linkUrl:normalizeItineraryLink(item.linkUrl) }, cost })
   }
   updateItinerary(id: string, patch: ItineraryPatch, linkedCost?: LinkedCostInput | null) {
-    return this.write('itinerary.update', { id, patch, linkedCost })
+    const normalizedPatch = { ...patch,
+      ...('linkUrl' in patch ? { linkUrl:normalizeItineraryLink(patch.linkUrl) ?? null } : {}) }
+    return this.write('itinerary.update', { id,
+      patch:normalizedPatch,
+      linkedCost })
   }
   moveItineraryGroup(id: string, dayId: string) { return this.write('itinerary.update', { id, patch: { dayId } }) }
   deleteItineraryItem(id: string) { return this.write('itinerary.delete', { id }) }
@@ -349,7 +357,7 @@ export class CloudNotebookRepository {
         photos.push({ ...metadata, storagePath })
       }
       const payload = clean({ schemaVersion: 4, ...data, photos })
-      const { data: acknowledgement, error } = await this.client.rpc('restore_notebook_v2', {
+      const { data: acknowledgement, error } = await this.client.rpc('restore_notebook_v3', {
         p_trip_id: this.tripId,
         p_payload: payload,
       })

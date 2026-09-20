@@ -303,8 +303,8 @@ export class OfflineDownloads {
         clearTimeout(timer)
       }
     }
-    const rpc = async (name: 'list_notebook_trips' | 'load_notebook_v5') => {
-      const response = await request(() => client.rpc(name, name === 'load_notebook_v5' ? { p_trip_id: tripId } : undefined)
+    const rpc = async (name: 'list_notebook_trips' | 'load_notebook_v6') => {
+      const response = await request(() => client.rpc(name, name === 'load_notebook_v6' ? { p_trip_id: tripId } : undefined)
         .abortSignal(controller.signal))
       if (response.error) throw response.error
       return response.data as unknown
@@ -325,7 +325,7 @@ export class OfflineDownloads {
         onProgress?.(attempt ? 'The trip changed. Retrying a complete download…' : 'Checking access to this trip…')
         await verifyAccess()
         onProgress?.('Downloading the complete notebook…')
-        const raw = await rpc('load_notebook_v5')
+        const raw = await rpc('load_notebook_v6')
         validateCloudNotebook(raw, tripId)
         const before = canonicalMetadata(raw)
         const photos: PhotoEntry[] = []
@@ -340,7 +340,7 @@ export class OfflineDownloads {
           photos.push({ ...photo, blob })
         }
         onProgress?.('Verifying the complete download…')
-        const after = await rpc('load_notebook_v5')
+        const after = await rpc('load_notebook_v6')
         validateCloudNotebook(after, tripId)
         await verifyAccess()
         if (before !== canonicalMetadata(after)) {

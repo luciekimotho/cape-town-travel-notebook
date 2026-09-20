@@ -69,6 +69,10 @@ certification.
    local copy does not remove the shared trip.
 
 Saved addresses and Google Maps links remain editable in activity forms and appear only in activity details.
+Scheduled itinerary items also support one **Activity or map link**, restricted to
+HTTPS GetYourGuide or Google Maps URLs. Tour groups use the reviewed product page;
+individual area stops can use Google Maps. Links require a live connection and are
+retained in ZIP backups and downloaded read-only trips.
 
 ## Stamp designs
 

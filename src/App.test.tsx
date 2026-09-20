@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import App, { TransientNotice } from './App'
-import { db, initializeDatabase, materializeTemplate, scheduleCandidatePlace } from './db'
+import App, { NotebookApplication, TransientNotice } from './App'
+import { db, initializeDatabase, loadData, materializeTemplate, scheduleCandidatePlace } from './db'
 import { localNotebookStore } from './notebookStore'
 
 beforeEach(async () => {
@@ -25,6 +25,60 @@ async function seedTour() {
   if (!template) throw new Error('Missing peninsula template')
   return materializeTemplate(template, '2026-09-21')
 }
+
+describe('current itinerary focus', () => {
+  beforeEach(async () => {
+    await initializeDatabase()
+    await db.items.update('dated-item-red-bus-mountain', { time: '09:00' })
+    await db.items.update('dated-item-red-bus-mountain-0', { time: '09:15' })
+    await db.places.add({ id:'place-current-second', name:'Afternoon plan', wantToVisit:false, createdAt:'', updatedAt:'' })
+    await db.items.add({ id:'item-current-second', dayId:'2026-09-22', placeId:'place-current-second', time:'11:00', position:99, visited:false, createdAt:'', updatedAt:'' })
+  })
+
+  it('selects Cape Town today, marks one activity current and scrolls once', async () => {
+    const notebook = await loadData()
+    const scroll = vi.fn()
+    const animation = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { callback(0); return 1 })
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll })
+    render(<NotebookApplication store={localNotebookStore} initialData={notebook} clock={() => new Date('2026-09-22T08:00:00Z')}/>)
+    expect(screen.getByRole('button', { name: /22/ })).toHaveAttribute('aria-pressed', 'true')
+    const current = screen.getByRole('button', { current: 'time' })
+    expect(current).toHaveTextContent('Now')
+    expect(current).toHaveTextContent('Red Bus & Table Mountain')
+    expect(current.querySelector('time.activity-time')).toHaveTextContent('09:00')
+    expect(current.querySelector('time.activity-time')).toHaveAttribute('datetime', '09:00')
+    const firstStop = screen.getByRole('button', { name: /09:15.*Cape Town Red Bus/ })
+    expect(firstStop.querySelector('time.route-time')).toHaveTextContent('09:15')
+    expect(scroll).toHaveBeenCalledOnce()
+    expect(scroll).toHaveBeenCalledWith({ block: 'center', behavior: 'smooth' })
+    fireEvent.click(screen.getByRole('button', { name: /23/ }))
+    fireEvent.click(screen.getByRole('button', { name: /22/ }))
+    expect(scroll).toHaveBeenCalledOnce()
+    animation.mockRestore()
+  })
+
+  it('updates at a start boundary and on visibility without stealing the selected day', async () => {
+    let now = new Date('2026-09-22T08:59:10Z')
+    const notebook = await loadData()
+    render(<NotebookApplication store={localNotebookStore} initialData={notebook} clock={() => now}/>)
+    expect(screen.getByRole('button', { current: 'time' })).toHaveTextContent('Red Bus & Table Mountain')
+    now = new Date('2026-09-22T09:00:00Z')
+    act(() => window.dispatchEvent(new Event('focus')))
+    expect(screen.getByRole('button', { current: 'time' })).toHaveTextContent('Afternoon plan')
+    fireEvent.click(screen.getByRole('button', { name: /23/ }))
+    now = new Date('2026-09-23T22:01:00Z')
+    act(() => document.dispatchEvent(new Event('visibilitychange')))
+    expect(screen.getByRole('button', { name: /23/ })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('computes the same current marker in a downloaded read-only copy', async () => {
+    const notebook = await loadData()
+    const store = { ...localNotebookStore, kind: 'download' as const, readOnly: true }
+    render(<NotebookApplication store={store} initialData={notebook} clock={() => new Date('2026-09-22T08:00:00Z')}/>)
+    expect(screen.getByRole('button', { current: 'time' })).toHaveTextContent('Now')
+    expect(screen.getByText('Downloaded trip · read-only')).toBeInTheDocument()
+  })
+})
 
 describe('transient success notices', () => {
   it('dismisses after 20 seconds', () => {
@@ -187,6 +241,7 @@ describe('unified activity form', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add activity' }))
     const dialog = screen.getByRole('dialog', { name: 'Add activity' })
     fireEvent.change(within(dialog).getByLabelText('Name *'), { target: { value: 'Our sunset picnic' } })
+    fireEvent.change(within(dialog).getByLabelText('Activity or map link'), { target: { value: 'https://www.getyourguide.com/cape-town-l103/example-t123/' } })
     fireEvent.click(within(dialog).getByText('Choose a design'))
     expect(within(dialog).getByRole('radio', { name: 'Default' })).toBeChecked()
     fireEvent.click(within(dialog).getByRole('radio', { name: 'Lighthouse' }))
@@ -195,7 +250,9 @@ describe('unified activity form', () => {
     const place = await db.places.filter(candidate => candidate.name === 'Our sunset picnic').first()
     const item = await db.items.where('placeId').equals(place!.id).first()
     expect(item?.stampKind).toBe('lighthouse')
+    expect(item?.linkUrl).toBe('https://www.getyourguide.com/cape-town-l103/example-t123/')
     fireEvent.click(screen.getByRole('button', { name: /Our sunset picnic/ }))
+    expect(screen.getByRole('link', { name: 'Open on GetYourGuide' })).toHaveAttribute('href', item?.linkUrl)
     fireEvent.click(screen.getByRole('button', { name: 'Stamp this visit' }))
     await waitFor(() => expect(document.querySelector('.hero-stamp > svg')).toHaveAttribute('data-stamp-kind', 'lighthouse'))
     fireEvent.click(screen.getByRole('button', { name: 'Itinerary' }))
@@ -270,7 +327,7 @@ describe('unified activity form', () => {
     await renderApp()
     fireEvent.click(screen.getByRole('button', { name: 'Add activity' }))
     const dialog = screen.getByRole('dialog', { name: 'Add activity' })
-    for (const label of ['Name *','Parent activity','Day','Time','Cost','Currency','Booking status','Address','Google Maps URL','Notes']) {
+    for (const label of ['Name *','Parent activity','Day','Time','Activity or map link','Cost','Currency','Booking status','Address','Google Maps URL','Notes']) {
       expect(within(dialog).getByLabelText(label)).toBeInTheDocument()
     }
     const fields = within(dialog).getAllByRole('textbox').concat(within(dialog).getAllByRole('combobox')).concat(within(dialog).getAllByRole('spinbutton'))

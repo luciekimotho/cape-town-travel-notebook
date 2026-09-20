@@ -12,7 +12,7 @@ export function metadataFixture(): CloudNotebookMetadata {
     places: [{ id: 'place-a', name: 'Mountain', stampKind: 'mountain', address: 'Table Mountain', notes: 'Cable car', googleMapsUrl: 'https://maps.google.com/', wantToVisit: false, seeded: true, createdAt: now, updatedAt: now }],
     activityTemplates: [{ id: 'template-a', name: 'Mountain day', stampKind: 'auto', description: 'A day out', stops: [{ id: 'stop-a', placeName: 'Mountain', placeId: 'place-a', notes: ['Bring water', 'Book ahead'], approximateMinutes: 90, optional: true }], seeded: false, createdAt: now, updatedAt: now }],
     items: [
-      { id: 'group-a', dayId: 'day-a', placeId: 'place-a', stampKind: 'auto', templateId: 'template-a', isActivityGroup: true, time: '08:30', notes: 'Day trip', bookingStatus: 'Confirmed', visited: false, position: 0, createdAt: now, updatedAt: now },
+      { id: 'group-a', dayId: 'day-a', placeId: 'place-a', stampKind: 'auto', templateId: 'template-a', isActivityGroup: true, time: '08:30', linkUrl: 'https://www.getyourguide.com/cape-town-l103/example-t123/', notes: 'Day trip', bookingStatus: 'Confirmed', visited: false, position: 0, createdAt: now, updatedAt: now },
       { id: 'item-a', dayId: 'day-a', placeId: 'place-a', stampKind: 'pin', parentId: 'group-a', templateId: 'template-a', isActivityGroup: false, time: '09:30', notes: 'View', bookingStatus: 'Booked', visited: true, position: 1, createdAt: now, updatedAt: now },
     ],
     expenses: [{ id: 'expense-a', amount: 120.5, currency: 'ZAR', date: '2026-09-21', category: 'Activity', note: 'Tickets', rateSetId: 'rate-old', itineraryItemId: 'item-a', createdAt: now, updatedAt: now }],
@@ -51,7 +51,7 @@ export function mockClient(options: {
           calls.membership++
           return options.membership ? options.membership() : { data: [{ id: 'trip-a', role: 'owner' }], error: null }
         }
-        if (name !== 'load_notebook_v5') throw new Error(`Unexpected RPC ${name}`)
+        if (name !== 'load_notebook_v6') throw new Error(`Unexpected RPC ${name}`)
         calls.load++
         return options.load ? options.load() : { data: structuredClone(raw), error: null }
       }

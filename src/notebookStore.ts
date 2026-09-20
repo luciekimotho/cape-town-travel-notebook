@@ -39,6 +39,7 @@ export interface ScheduledItemPatch {
   stampKind?: StampDesign
   parentId?: string
   time?: string
+  linkUrl?: string
   bookingStatus?: ItineraryItem['bookingStatus']
   notes?: string
 }
