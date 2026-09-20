@@ -2,6 +2,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { NotebookStore } from '../notebookStore'
 import type { AppData, Expense, PhotoEntry } from '../types'
 import { CloudNotebookRepository } from './repository'
+import { isConnectionError } from './connection'
+import { isAuthorizationError } from '../offline/downloads'
 
 const requireOnline = () => {
   if (!navigator.onLine) throw new Error('Cloud editing needs an internet connection. Nothing was saved.')
@@ -9,6 +11,8 @@ const requireOnline = () => {
 
 export class CloudNotebookStore implements NotebookStore {
   readonly kind = 'cloud' as const
+  readOnly = false
+  onUnavailable?: (error: unknown) => void
   readonly tripId: string
   private readonly repository: CloudNotebookRepository
   private snapshot?: AppData
@@ -22,15 +26,23 @@ export class CloudNotebookStore implements NotebookStore {
     requireOnline()
   }
 
-  async load() {
+  async load(client?: SupabaseClient) {
     requireOnline()
-    this.snapshot = await this.repository.load()
+    this.snapshot = await (client ? new CloudNotebookRepository(this.tripId, client) : this.repository).load()
     return this.snapshot
   }
 
   private async saved(operation: () => Promise<{ notebook?: AppData; cleanupWarning?: string }>) {
+    if (this.readOnly) throw new Error('Reconnect and verify your account before editing. Nothing was saved.')
     requireOnline()
-    const result = await operation()
+    let result: { notebook?: AppData; cleanupWarning?: string }
+    try { result = await operation() } catch (error) {
+      if (isConnectionError(error) || isAuthorizationError(error)) {
+        this.readOnly = true
+        this.onUnavailable?.(error)
+      }
+      throw error
+    }
     const notebook = result.notebook ?? this.snapshot
     if (!notebook) throw new Error('The change was saved, but the notebook must be reloaded before continuing.')
     this.snapshot = notebook

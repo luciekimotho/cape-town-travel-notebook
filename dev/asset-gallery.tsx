@@ -2,6 +2,8 @@ import { StrictMode, useState, type ComponentProps, type CSSProperties } from 'r
 import { createRoot } from 'react-dom/client'
 import { EmptyDayArt, LineIcon, MarkerIcon, PlaceScene, PlaceThumbnail, TravelStamp, type ArtKind } from '../src/Artwork'
 import { MomentPostcard, PostcardStamp } from '../src/MomentPostcard'
+import { StampPicker } from '../src/StampPicker'
+import type { StampDesign } from '../src/stampDesign'
 import './asset-gallery.css'
 
 const lineIcons: ComponentProps<typeof LineIcon>['name'][] = [
@@ -43,6 +45,8 @@ const postcardSamples = [
 
 function Gallery() {
   const [selectedPostcard, setSelectedPostcard] = useState<string>()
+  const [stampName, setStampName] = useState('Our Cape Town picnic')
+  const [stampDesign, setStampDesign] = useState<StampDesign>('pin')
   return <main className="guide">
     <header className="masthead">
       <div className="facades" aria-hidden="true">{colors.slice(0,5).map(([, color])=><i key={color} style={{background:color}}/>)}</div>
@@ -70,8 +74,13 @@ function Gallery() {
       <div className="scene-grid">{artSamples.map(({kind,name}, index)=><article key={kind} style={{'--delay':`${index*35}ms`} as CSSProperties}><PlaceScene name={name}/><footer><span>{String(index+1).padStart(2,'0')}</span><div><strong>{name}</strong><small>{kind}{kind==='pin'?' · neutral fallback':''}</small></div><div className="scene-mini"><PlaceThumbnail name={name}/><MarkerIcon kind={kind}/></div></footer></article>)}</div>
     </section>
 
-    <section className="chapter">
+    <section className="chapter" id="stamp-picker">
       <ChapterNumber value="04"/><div className="chapter-heading"><p>Passport memories</p><h2>Safe-area postage stamps</h2></div>
+      <div className="stamp-picker-review">
+        <label>Preview name<input value={stampName} maxLength={90} onChange={event => setStampName(event.target.value)}/></label>
+        <StampPicker name={stampName} value={stampDesign} date="2026-09-25" onChange={setStampDesign}/>
+        <p>Preview only · no trip records are changed.</p>
+      </div>
       <div className="stamp-grid">{artSamples.map(({kind,name})=><figure key={kind}><div className="stamp-pair"><TravelStamp name={name} date="2026-09-25"/></div></figure>)}</div>
     </section>
 

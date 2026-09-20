@@ -58,6 +58,10 @@ code { font-family: ui-monospace,SFMono-Regular,monospace; font-size: .88em; }
 .scene-grid footer .scene-mini > svg:last-child { width: 38px; height: 32px; color: #006b72; }
 @keyframes rise { from { opacity: 0; transform: translateY(18px); } }
 .stamp-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap: 24px 14px; }
+.stamp-picker-review { max-width: 400px; margin: 0 auto 32px; }
+.stamp-picker-review > label { display: grid; gap: 8px; margin-bottom: 16px; font-size: 12px; font-weight: 700; }
+.stamp-picker-review > label > input { width: 100%; min-height: 44px; padding: 10px; border: 1px solid #ddd1ba; background: #fffaf0; border-radius: 8px; font: inherit; }
+.stamp-picker-review > p { font-size: 11px; color: #6a6258; }
 .stamp-grid figure { display: grid; justify-items: center; gap: 10px; padding: 15px; background: #fffaf0; border-bottom: 4px double #c9b996; }
 .stamp-pair > svg { width: 128px; height: auto; transform: rotate(-3deg); }
 .stamp-grid figure:nth-child(even) .stamp-pair > svg { transform: rotate(3deg); }

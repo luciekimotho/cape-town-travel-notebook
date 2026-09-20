@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App, { TransientNotice } from './App'
 import { db, initializeDatabase, materializeTemplate, scheduleCandidatePlace } from './db'
+import { localNotebookStore } from './notebookStore'
 
 beforeEach(async () => {
   vi.restoreAllMocks()
@@ -181,6 +182,90 @@ describe('itinerary timeline and detail context', () => {
 })
 
 describe('unified activity form', () => {
+  it('saves a selected stamp for a custom activity and uses its own name in Moments', async () => {
+    await renderApp()
+    fireEvent.click(screen.getByRole('button', { name: 'Add activity' }))
+    const dialog = screen.getByRole('dialog', { name: 'Add activity' })
+    fireEvent.change(within(dialog).getByLabelText('Name *'), { target: { value: 'Our sunset picnic' } })
+    fireEvent.click(within(dialog).getByText('Choose a design'))
+    expect(within(dialog).getByRole('radio', { name: 'Default' })).toBeChecked()
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Lighthouse' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save activity' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    const place = await db.places.filter(candidate => candidate.name === 'Our sunset picnic').first()
+    const item = await db.items.where('placeId').equals(place!.id).first()
+    expect(item?.stampKind).toBe('lighthouse')
+    fireEvent.click(screen.getByRole('button', { name: /Our sunset picnic/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Stamp this visit' }))
+    await waitFor(() => expect(document.querySelector('.hero-stamp > svg')).toHaveAttribute('data-stamp-kind', 'lighthouse'))
+    fireEvent.click(screen.getByRole('button', { name: 'Itinerary' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Moments' }))
+    const postcard = screen.getByRole('button', { name: /Our sunset picnic travel stamp/ })
+    expect(postcard.querySelector('.stamp-name')?.textContent).toBe('OUR SUNSET PICNIC')
+    expect(postcard.querySelector('[data-stamp-kind]')).toHaveAttribute('data-stamp-kind', 'lighthouse')
+    fireEvent.click(postcard)
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    fireEvent.click(screen.getByText('Choose a design'))
+    fireEvent.click(screen.getByRole('radio', { name: 'Default' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save activity' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(document.querySelector('.hero-stamp > svg')).toHaveAttribute('data-stamp-kind', 'pin')
+    expect(await db.stamps.where('itineraryItemId').equals(item!.id).first()).toMatchObject({
+      placeName: 'Our sunset picnic', visitDate: '2026-09-21', stampKind: 'pin',
+    })
+  })
+
+  it('keeps a stamp selection as a draft when an edit fails, and cancel leaves it unchanged', async () => {
+    await seedTour()
+    await renderApp()
+    fireEvent.click(screen.getByRole('button', { name: /Bo-Kaap/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    const dialog = screen.getByRole('dialog', { name: 'Edit activity' })
+    fireEvent.click(within(dialog).getByText('Choose a design'))
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Penguins' }))
+    vi.spyOn(localNotebookStore, 'saveItineraryDetails').mockRejectedValueOnce({ message: 'Save rejected by server', code: '42501' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save activity' }))
+    await screen.findByRole('alert')
+    expect(screen.getByRole('alert')).toHaveTextContent('Save rejected by server (42501)')
+    expect(within(dialog).getByRole('radio', { name: 'Penguins' })).toBeChecked()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    fireEvent.click(screen.getByText('Choose a design'))
+    expect(screen.getByRole('radio', { name: 'Automatic' })).toBeChecked()
+  })
+
+  it('remembers the chosen design for an unscheduled place and when scheduling it', async () => {
+    await renderApp()
+    fireEvent.click(screen.getByRole('button', { name: 'Places' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add place' }))
+    fireEvent.change(screen.getByLabelText('Name *'), { target: { value: 'Our favourite cafe' } })
+    fireEvent.click(screen.getByText('Choose a design'))
+    fireEvent.click(screen.getByRole('radio', { name: 'Bo-Kaap' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save activity' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    const saved = await db.places.filter(place => place.name === 'Our favourite cafe').first()
+    expect(saved).toMatchObject({ stampKind: 'house', wantToVisit: true })
+    fireEvent.click(screen.getByRole('button', { name: /Our favourite cafe/ }))
+    fireEvent.click(screen.getByText('Choose a design'))
+    expect(screen.getByRole('radio', { name: 'Bo-Kaap' })).toBeChecked()
+    fireEvent.change(screen.getByLabelText('Day'), { target: { value: '2026-09-21' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save activity' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(await db.items.where('placeId').equals(saved!.id).first()).toMatchObject({ stampKind: 'house' })
+    expect(await db.places.get(saved!.id)).toMatchObject({ wantToVisit: false })
+  })
+
+  it('saves a design on an activity template without scheduling it', async () => {
+    await renderApp()
+    fireEvent.click(screen.getByRole('button', { name: 'Places' }))
+    fireEvent.click(screen.getByRole('button', { name: /Table Mountain.*activity/ }))
+    fireEvent.click(screen.getByText('Choose a design'))
+    fireEvent.click(screen.getByRole('radio', { name: 'Cape cliffs' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save activity' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(await db.activityTemplates.get('seed-template-table-mountain')).toMatchObject({ stampKind: 'cliff' })
+  })
+
   it('shows every approved field and only requires Name', async () => {
     await renderApp()
     fireEvent.click(screen.getByRole('button', { name: 'Add activity' }))

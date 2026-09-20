@@ -1,6 +1,8 @@
-import type { Session } from '@supabase/supabase-js'
+import type { Session, SupabaseClient } from '@supabase/supabase-js'
 import { clearCloudSession, getCloudClient } from './client'
 import { getCloudConfig } from './config'
+import { offlineDownloads } from '../offline/downloads'
+import { bounded } from './connection'
 
 export function consumeAuthCallbackError(): string {
   const parameters = new URLSearchParams(window.location.hash.replace(/^#/, ''))
@@ -59,12 +61,15 @@ export async function currentSession(): Promise<Session | null> {
   return data.session
 }
 
-export async function signOut() {
-  await clearCloudSession()
+export async function signOut(onDeviceCleared?: () => void) {
+  // Revoke download leases before the SDK can emit SIGNED_OUT.
+  await offlineDownloads.clearAll()
+  onDeviceCleared?.()
+  await bounded(clearCloudSession())
 }
 
-export async function claimSharedTrip() {
-  const { data, error } = await getCloudClient().rpc('claim_trip_access')
+export async function claimSharedTrip(client: SupabaseClient = getCloudClient()) {
+  const { data, error } = await client.rpc('claim_trip_access')
   if (error) throw error
   return data
 }

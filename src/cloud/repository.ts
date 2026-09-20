@@ -3,6 +3,7 @@ import type {
   ActivityTemplate, AppData, ChecklistItem, Currency, Expense, ItineraryItem, PhotoEntry, Place, RateSet, Trip,
 } from '../types'
 import { getCloudClient } from './client'
+import { validateNotebookStampDesigns } from '../stampDesign'
 
 export interface CloudTripSummary {
   id: string
@@ -35,14 +36,14 @@ export interface LinkedCostInput {
 }
 
 export type ItineraryPatch = Partial<Pick<ItineraryItem,
-  'dayId' | 'parentId' | 'time' | 'notes' | 'bookingStatus' | 'position'>> & {
+  'stampKind' | 'dayId' | 'parentId' | 'time' | 'notes' | 'bookingStatus' | 'position'>> & {
   name?: string
   address?: string
   googleMapsUrl?: string
 }
 
 export interface PlacePatch extends Partial<Pick<Place,
-  'name' | 'address' | 'notes' | 'googleMapsUrl' | 'wantToVisit'>> {}
+  'stampKind' | 'name' | 'address' | 'notes' | 'googleMapsUrl' | 'wantToVisit'>> {}
 
 export interface MaterializeDetails extends PlacePatch {
   parentId?: string
@@ -109,13 +110,14 @@ export async function createFreshTrip(client: SupabaseClient = getCloudClient())
 }
 
 export async function loadCloudNotebook(tripId: string, client: SupabaseClient = getCloudClient()): Promise<CloudAppData> {
-  const { data, error } = await client.rpc('load_notebook_v4', { p_trip_id: tripId })
-  if (error) throw error
+  const { data, error } = await client.rpc('load_notebook_v5', { p_trip_id: tripId })
+  if (error) throw cloudSchemaError(error)
   if (!data || typeof data !== 'object') throw new Error('The server returned an invalid notebook.')
   const notebook = data as Omit<AppData, 'photos'> & {
     photos: Array<Omit<PhotoEntry, 'blob'> & { storagePath?: string }>
   }
   if (!Array.isArray(notebook.photos)) throw new Error('The server returned invalid photo metadata.')
+  validateNotebookStampDesigns(notebook)
   const photos: CloudPhotoEntry[] = []
   for (const photo of notebook.photos) {
     const extension = photo.mimeType === 'image/png' ? 'png' : photo.mimeType === 'image/webp' ? 'webp' : 'jpg'
@@ -129,6 +131,13 @@ export async function loadCloudNotebook(tripId: string, client: SupabaseClient =
 }
 
 const clean = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+
+function cloudSchemaError(error: { code?: string; message: string }): Error | typeof error {
+  if (error.code === 'PGRST202' || error.code === '42883') {
+    return new Error('Cloud stamp designs require migration 0004_stamp_designs.sql. Apply it in Supabase SQL Editor, then reload.')
+  }
+  return error
+}
 
 export class CloudNotebookRepository {
   readonly tripId: string
@@ -155,12 +164,12 @@ export class CloudNotebookRepository {
   }
 
   private async write(operation: string, payload: Record<string, unknown> = {}): Promise<MutationResult> {
-    const { data, error } = await this.client.rpc('mutate_notebook_v1', {
+    const { data, error } = await this.client.rpc('mutate_notebook_v2', {
       p_trip_id: this.tripId,
       p_operation: operation,
       p_payload: clean(payload),
     })
-    if (error) throw error
+    if (error) throw cloudSchemaError(error)
     if (!data || data.ok !== true || data.operation !== operation) {
       throw new Error('The server did not acknowledge the notebook change.')
     }
@@ -182,11 +191,11 @@ export class CloudNotebookRepository {
   updatePlace(id: string, patch: PlacePatch) { return this.write('place.update', { id, patch }) }
   deletePlace(id: string) { return this.write('place.delete', { id }) }
   scheduleWishlistPlace(placeId: string, dayId: string, cost?: LinkedCostInput, placePatch?: PlacePatch,
-    itemPatch?: Partial<Pick<ItineraryItem, 'parentId' | 'time' | 'bookingStatus' | 'notes'>>) {
+    itemPatch?: Partial<Pick<ItineraryItem, 'stampKind' | 'parentId' | 'time' | 'bookingStatus' | 'notes'>>) {
     return this.write('place.schedule', { placeId, dayId, cost, placePatch, itemPatch })
   }
 
-  updateActivityTemplate(id: string, patch: Partial<Pick<ActivityTemplate, 'name' | 'description' | 'stops'>>) {
+  updateActivityTemplate(id: string, patch: Partial<Pick<ActivityTemplate, 'stampKind' | 'name' | 'description' | 'stops'>>) {
     return this.write('template.update', { id, patch })
   }
   deleteActivityTemplate(id: string) { return this.write('template.delete', { id }) }
@@ -313,6 +322,7 @@ export class CloudNotebookRepository {
   revokePendingShare() { return this.write('collaboration.revoke_pending') }
 
   async restoreNotebook(data: AppData): Promise<RestoreResult> {
+    validateNotebookStampDesigns(data)
     const bucket = this.client.storage.from('trip-photos')
     const uploadedPaths: string[] = []
     const photos: Record<string, unknown>[] = []
@@ -339,11 +349,11 @@ export class CloudNotebookRepository {
         photos.push({ ...metadata, storagePath })
       }
       const payload = clean({ schemaVersion: 4, ...data, photos })
-      const { data: acknowledgement, error } = await this.client.rpc('restore_notebook_v1', {
+      const { data: acknowledgement, error } = await this.client.rpc('restore_notebook_v2', {
         p_trip_id: this.tripId,
         p_payload: payload,
       })
-      if (error) throw error
+      if (error) throw cloudSchemaError(error)
       if (!acknowledgement || acknowledgement.ok !== true || acknowledgement.operation !== 'notebook.restore') {
         throw new Error('The server did not acknowledge the notebook restore.')
       }

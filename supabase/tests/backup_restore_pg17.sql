@@ -1,4 +1,4 @@
--- PostgreSQL 17 integration assertions. Run after 0001 -> 0002 -> 0003 in a
+-- PostgreSQL 17 integration assertions. Run after 0001 -> 0002 -> 0003 -> 0004 in a
 -- Supabase-compatible test database; the transaction leaves no application data.
 begin;
 do $$
@@ -26,17 +26,17 @@ begin
       "startDate":"2026-09-21","endDate":"2026-09-21","timezone":"Africa/Johannesburg","notes":"restored"},
     "checklist":[{"id":"check-1","title":"Passport","category":"Documents","completed":false}],
     "days":[{"id":"day-1","date":"2026-09-21","outOfRange":false}],
-    "places":[{"id":"place-1","name":"Waterfront","wantToVisit":false,"seeded":false}],
-    "activityTemplates":[{"id":"template-1","name":"Walk","description":"A walk","seeded":false,
+    "places":[{"id":"place-1","name":"Waterfront","stampKind":"boat","wantToVisit":false,"seeded":false}],
+    "activityTemplates":[{"id":"template-1","name":"Walk","stampKind":"road","description":"A walk","seeded":false,
       "stops":[{"id":"stop-1","placeId":"place-1","placeName":"Waterfront","notes":[]}]}],
     "items":[{"id":"item-1","dayId":"day-1","placeId":"place-1","templateId":"template-1",
-      "visited":true,"position":0}],
+      "stampKind":"pin","visited":true,"position":0}],
     "rateSets":[{"id":"rate-1","label":"Recorded","effectiveDate":"2026-09-16",
       "kesPerKes":1,"kesPerUsd":129.5,"kesPerZar":8.1,"active":true,"example":false}],
     "expenses":[{"id":"expense-1","amount":10,"currency":"USD","date":"2026-09-21",
       "category":"Activity","rateSetId":"rate-1","itineraryItemId":"item-1"}],
     "stamps":[{"id":"stamp-1","itineraryItemId":"item-1","placeName":"Waterfront",
-      "visitDate":"2026-09-21","detached":false}],
+      "stampKind":"pin","visitDate":"2026-09-21","detached":false}],
     "photos":[{"id":"photo-1","stampId":"stamp-1","caption":"Ocean","mimeType":"image/jpeg",
       "width":10,"height":10,"size":3,
       "storagePath":"20000000-0000-4000-8000-000000000001/photo-1-30000000-0000-4000-8000-000000000001.jpg"}],
@@ -44,7 +44,7 @@ begin
   }
   $json$::jsonb;
 
-  result := public.restore_notebook_v1(v_trip_id,payload);
+  result := public.restore_notebook_v2(v_trip_id,payload);
   if result#>>'{counts,checklist}' <> '1' or result#>>'{counts,days}' <> '1'
      or result#>>'{counts,items}' <> '1' or result#>>'{counts,places}' <> '1'
      or result#>>'{counts,activityTemplates}' <> '1' or result#>>'{counts,activityTemplateStops}' <> '1'
@@ -63,9 +63,20 @@ begin
   if (select count(*) from public.trip_members where trip_id=v_trip_id) <> 1 then
     raise exception 'Restore changed trip membership';
   end if;
+  result := public.load_notebook_v5(v_trip_id);
+  if public.load_notebook_v4(v_trip_id) <> result then
+    raise exception 'Legacy read lost designs or private photo metadata';
+  end if;
+  if result#>>'{photos,0,storagePath}' <> payload#>>'{photos,0,storagePath}'
+    or result#>>'{places,0,stampKind}' <> 'boat'
+    or result#>>'{items,0,stampKind}' <> 'pin'
+    or result#>>'{activityTemplates,0,stampKind}' <> 'road'
+    or result#>>'{stamps,0,stampKind}' <> 'pin' then
+    raise exception 'Read wrapper lost designs or private photo storage path';
+  end if;
 
   begin
-    perform public.restore_notebook_v1(
+    perform public.restore_notebook_v2(
       v_trip_id,
       jsonb_set(payload,'{items,0,dayId}','"other-trip-day"'::jsonb)
     );
@@ -80,7 +91,7 @@ begin
 
   perform set_config('request.jwt.claim.sub',outsider_id::text,true);
   begin
-    perform public.restore_notebook_v1(v_trip_id,payload);
+    perform public.restore_notebook_v2(v_trip_id,payload);
     raise exception 'Non-owner restore was accepted';
   exception when others then
     if sqlerrm = 'Non-owner restore was accepted' then raise; end if;

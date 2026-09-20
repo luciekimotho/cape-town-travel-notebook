@@ -1,7 +1,8 @@
 import { SceneIllustration } from './SceneIllustrations'
 import type { ReactNode } from 'react'
+import type { StampDesign, StampKind } from './stampDesign'
 
-export type ArtKind = 'mountain' | 'penguin' | 'house' | 'cape' | 'lighthouse' | 'road' | 'boat' | 'huts' | 'promenade' | 'wine' | 'cliff' | 'pin'
+export type ArtKind = StampKind
 
 const normalized = (name: string) => name.toLowerCase()
 
@@ -114,12 +115,12 @@ export function stampMonthLabel(date?: string): string {
   return `${month === 'SEP' ? 'SEPT' : month} ${parsedDate.getUTCFullYear()}`
 }
 
-export function TravelStamp({ name, date, className = '' }: { name: string; date?: string; className?: string }) {
-  const kind = artKindFor(name)
+export function TravelStamp({ name, date, className = '', stampKind }: { name: string; date?: string; className?: string; stampKind?: StampDesign }) {
+  const kind = !stampKind || stampKind === 'auto' ? artKindFor(name) : stampKind
   const color = colorForKind(kind)
   const { lines, fontSize, lineHeight, markerScale, markerTop } = stampLayout(name)
   const dateLabel = stampMonthLabel(date)
-  return <svg className={className} viewBox="0 0 128 129" role="img" aria-label={`${name} travel stamp, ${dateLabel}`} style={{ color }} data-safe-stamp="">
+  return <svg className={className} viewBox="0 0 128 129" role="img" aria-label={`${name} travel stamp, ${dateLabel}`} style={{ color }} data-safe-stamp="" data-stamp-kind={kind}>
     <rect x="4" y="6" width="120" height="117" rx="9" fill="#fff4de" stroke="currentColor" strokeWidth="2" strokeDasharray="3 3"/>
     <rect data-inner-border="" x="10" y="12" width="108" height="105" rx="6" fill="none" stroke="currentColor" strokeWidth="1.6"/>
     <text className="stamp-name" x="64" y="26" fill="currentColor" textAnchor="middle" fontFamily="Georgia,serif" fontWeight="bold" fontSize={fontSize} xmlSpace="preserve">

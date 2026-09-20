@@ -1,21 +1,29 @@
 # Supabase setup
 
-The complete cloud setup uses two Dashboard-ready SQL files:
+The complete cloud setup uses four Dashboard-ready SQL files:
 
 | Migration | Contents |
 | --- | --- |
 | `0001_setup.sql` | Core domain schema and integrity; profiles and two-person exact-email sharing; RLS/grants; list/load and Cape Town bootstrap RPCs; private photo Storage |
 | `0002_cloud_app.sql` | Additive grouped bootstrap, transactional app mutations, collaboration controls, safe photo replacement, and owner-only validated ZIP restore |
+| `0003_fix_itinerary_edit.sql` | Schema-qualifies the deferred parent constraint so editing activities works with the RPC's restricted search path; changes no trip data |
+| `0004_stamp_designs.sql` | Optional validated stamp designs, live/detached snapshots, design-aware read/mutation/restore RPCs; leaves existing choices automatic |
 
 Apply `migrations/0001_setup.sql` through the normal migration runner (for example,
 `supabase db push`) after confirming the target Supabase project. Then apply
 `migrations/0002_cloud_app.sql`. The second file is deliberately additive because
 `0001_setup.sql` may already be installed.
+Then apply `migrations/0003_fix_itinerary_edit.sql` and `migrations/0004_stamp_designs.sql`
+in order. If the first three are already installed, run only `0004_stamp_designs.sql`;
+do not recreate the schema or bootstrap the trip. The fourth migration is transactional
+and intended to run once. It explicitly checks that the third migration is installed.
 
 For Dashboard-only setup:
 
 1. Open **SQL Editor → New query**, review the target project, paste the complete contents of `migrations/0001_setup.sql`, and run it once.
 2. Open another new query, paste `migrations/0002_cloud_app.sql`, and run it once.
+   Then run `migrations/0003_fix_itinerary_edit.sql` in a new query.
+   Finally run the complete `migrations/0004_stamp_designs.sql` in another new query.
 3. Configure the Authentication Site URL and Redirect URLs for the deployed and local app.
 4. Keep passwordless email sign-in enabled.
 5. Verify the `trip-photos` Storage bucket exists and is private.
@@ -58,6 +66,43 @@ for this bootstrap: **2026-09-16T10:25:03.518+03:00**.
 
 ## Exact-email sharing
 
+### Email codes for iOS Home Screen sign-in
+
+iOS Home Screen apps and Safari can use separate session storage. Complete
+verification inside the notebook instead of expecting a link opened in Mail/Safari
+to authenticate the installed app.
+
+If the Dashboard requires custom SMTP before editing templates, configure an
+approved mail provider first; the repository template is not applied by deployment.
+In **Authentication → Email Templates**, set both **Magic Link** and **Confirm signup**
+to the code-only content in `templates/magic-link.html` (preserve `{{ .Token }}`,
+remove old sign-in buttons and all `{{ .ConfirmationURL }}` links). Email scanners
+and iOS link previews can consume a one-time link before the app verifies it, even
+when a numeric code is also included. This is an Auth dashboard setting, not a SQL migration.
+The numeric code is verified by `verifyOtp` in the current app, where Supabase
+persists and refreshes that session. No token is passed through another browser.
+
+Until the templates are updated, the sign-in form's **My email only has a sign-in
+link** option accepts the original copied, unopened Supabase confirmation link.
+It validates the project URL and verification type, then verifies its token hash
+through the app's Supabase client without following the URL or its redirect.
+Already-consumed links, browser address-bar URLs, recovery links and tracked/wrapped
+URLs are not supported. This fallback is vulnerable to link previews consuming the
+credential; use code-only emails for dependable iOS entry. No credentials are placed
+in logs or application URLs.
+
+If iOS reloads the app while viewing email, enter the same email address and choose
+**I already have a code or link**, avoiding another email request.
+Email quota limits still apply; this change does not bypass them or configure SMTP.
+
+Real-device acceptance (not covered by desktop automation):
+1. Open the deployed notebook from the iPhone Home Screen and request an email.
+2. View the email without opening its sign-in link; return to the installed app.
+3. Enter the code, or copy the unopened link and use the link option.
+4. Confirm the existing itinerary loads without creating a new trip.
+5. Close and reopen the installed app; confirm the session remains signed in.
+6. Repeat after token refresh and test a failed/expired code, then repeat normal browser login.
+
 ```sql
 share_trip_with_email(p_trip_id uuid, p_email text) returns void
 revoke_trip_email_access(p_trip_id uuid) returns void
@@ -77,7 +122,7 @@ the partial unique index also permits at most one editor.
 
 ```sql
 list_notebook_trips()
-load_notebook_v4(p_trip_id uuid) returns jsonb
+load_notebook_v5(p_trip_id uuid) returns jsonb
 ```
 
 `list_notebook_trips()` returns caller memberships as:
@@ -86,16 +131,44 @@ load_notebook_v4(p_trip_id uuid) returns jsonb
 { id: uuid, destination: text, role: "owner" | "editor", updated_at: timestamptz }
 ```
 
-`load_notebook_v4` returns `NULL` unless the caller is a member. Its response uses the
+`load_notebook_v5` returns `NULL` unless the caller is a member. Its response uses the
 application's camel-case v4 domain shape and includes trip, checklist, days, items, places,
 activity templates, expenses, stamps, photo metadata, rate sets, and notebook metadata.
+The RPC version is not the backup schema version: ZIP backups remain schema 4.
+The new read wrapper retains both existing read layers, including private photo paths.
 
 ## Mutations
+
+### Stamp designs
+
+Places, itinerary items, activity templates, and stamp snapshots accept optional
+`stampKind`: `auto`, `mountain`, `penguin`, `house`, `cape`, `lighthouse`, `road`,
+`boat`, `huts`, `promenade`, `wine`, `cliff`, or `pin`. JSON omission remains valid
+for legacy schema-4 backups; invalid strings and explicit JSON `null` are rejected.
+`pin` is the neutral **Default** icon with the real place name. `auto` explicitly
+resets to name-based matching, overriding an inherited place choice.
+
+Items use `item.stampKind ?? place.stampKind ?? 'auto'`. A template's choice is the
+default for its new parent or single activity only; child stops inherit their own
+place choices. Creation snapshots the persisted effective choice; later item/place
+edits refresh linked stamps without rewriting their historical name/date. Deleting
+an activity detaches its memory with the final effective choice.
+
+Migration 0004 moves the original implementations into internal helpers (no authenticated
+execute grant). Both legacy and new public RPC names delegate to the design-aware
+implementations with null-safe membership/ownership guards. Existing deployed and cached
+clients can keep saving before the frontend release: omitted mutation fields leave choices
+unchanged, and `load_notebook_v4` includes choices so their schema-4 exports and restores
+retain them. Truly legacy backups without choices still restore automatic behavior.
+Updated clients require the new RPCs and report a missing-migration error rather than
+silently losing selections. The migration does not update existing trip records or change
+photo scenes. A repeated run fails immediately with an “already applied” error, without
+altering the installed functions or data.
 
 The browser mutation boundary is:
 
 ```sql
-mutate_notebook_v1(p_trip_id uuid, p_operation text, p_payload jsonb) returns jsonb
+mutate_notebook_v2(p_trip_id uuid, p_operation text, p_payload jsonb) returns jsonb
 trip_collaboration_status(p_trip_id uuid) returns jsonb
 ```
 
@@ -118,7 +191,7 @@ A failed metadata swap preserves the old row and removes the newly uploaded orph
 
 `CloudNotebookRepository.restoreNotebook(data)` uploads every restored photo to a fresh
 versioned private path, then calls the owner-only
-`restore_notebook_v1(p_trip_id, p_payload)` RPC once. The RPC validates schema version,
+`restore_notebook_v2(p_trip_id, p_payload)` RPC once. The RPC validates schema version,
 IDs, references, group/stamp/expense relationships, photo paths, and rates before replacing
 only that trip's content in one transaction. Membership and exact-email access are not
 modified. Upload or RPC failure removes all successfully uploaded new objects.

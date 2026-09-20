@@ -7,11 +7,13 @@ import {
   loadData,
   materializeTemplate,
   replaceAll,
+  refreshPlaceStampDesigns,
   saveItineraryDetails,
   scheduleCandidatePlace,
   type ItineraryDetailsPatch,
   type LinkedCostInput,
 } from './db'
+import { validateStampDesign, type StampDesign } from './stampDesign'
 import type {
   ActivityTemplate,
   AppData,
@@ -26,6 +28,7 @@ import type {
 } from './types'
 
 export interface PlacePatch {
+  stampKind?: StampDesign
   name?: string
   address?: string
   googleMapsUrl?: string
@@ -33,6 +36,7 @@ export interface PlacePatch {
 }
 
 export interface ScheduledItemPatch {
+  stampKind?: StampDesign
   parentId?: string
   time?: string
   bookingStatus?: ItineraryItem['bookingStatus']
@@ -49,7 +53,8 @@ export interface StoreWriteResult {
 export type StoreWrite = Promise<void | AppData | StoreWriteResult>
 
 export interface NotebookStore {
-  readonly kind: 'local' | 'cloud'
+  readonly kind: 'local' | 'cloud' | 'download'
+  readonly readOnly?: boolean
   readonly tripId?: string
   initialize(): Promise<void>
   load(): Promise<AppData>
@@ -70,7 +75,7 @@ export interface NotebookStore {
   addPlace(place: Place): StoreWrite
   updatePlace(placeId: string, patch: PlacePatch & { updatedAt: string }): StoreWrite
   deletePlace(placeId: string): StoreWrite
-  updateTemplate(templateId: string, patch: Pick<ActivityTemplate, 'name' | 'description' | 'updatedAt'>): StoreWrite
+  updateTemplate(templateId: string, patch: Pick<ActivityTemplate, 'name' | 'description' | 'updatedAt' | 'stampKind'>): StoreWrite
   deleteTemplate(templateId: string): StoreWrite
   saveExpense(expense: Expense): StoreWrite
   deleteExpense(expenseId: string): StoreWrite
@@ -90,8 +95,14 @@ export const localNotebookStore: NotebookStore = {
   deleteItineraryGroup,
   async materializeTemplate(template, dayId, cost, details) { await materializeTemplate(template, dayId, cost, details) },
   async createStamp(stamp, itemId) {
-    await db.transaction('rw', [db.items, db.stamps], async () => {
-      await db.stamps.add(stamp)
+    await db.transaction('rw', [db.items, db.places, db.stamps], async () => {
+      const item = await db.items.get(itemId)
+      if (!item) throw new Error('The itinerary item does not exist.')
+      const place = await db.places.get(item.placeId)
+      if (!place) throw new Error('The linked place does not exist.')
+      const stampKind = item.stampKind ?? place.stampKind ?? 'auto'
+      validateStampDesign(stampKind)
+      await db.stamps.add({ ...stamp, itineraryItemId: itemId, detached: false, stampKind })
       await db.items.update(itemId, { visited:true, updatedAt:new Date().toISOString() })
     })
   },
@@ -113,8 +124,14 @@ export const localNotebookStore: NotebookStore = {
   async saveChecklist(item) { await db.checklist.put(item) },
   async setChecklistCompleted(itemId, completed, updatedAt) { await db.checklist.update(itemId, { completed, updatedAt }) },
   async deleteChecklist(itemId) { await db.checklist.delete(itemId) },
-  async addPlace(place) { await db.places.add(place) },
-  async updatePlace(placeId, patch) { await db.places.update(placeId, patch) },
+  async addPlace(place) { validateStampDesign(place.stampKind); await db.places.add(place) },
+  async updatePlace(placeId, patch) {
+    validateStampDesign(patch.stampKind)
+    await db.transaction('rw', [db.places, db.items, db.stamps], async () => {
+      await db.places.update(placeId, patch)
+      if ('stampKind' in patch) await refreshPlaceStampDesigns(placeId)
+    })
+  },
   async deletePlace(placeId) {
     await db.transaction('rw', [db.places, db.items], async () => {
       if (await db.items.where('placeId').equals(placeId).count()) {
@@ -123,7 +140,7 @@ export const localNotebookStore: NotebookStore = {
       await db.places.delete(placeId)
     })
   },
-  async updateTemplate(templateId, patch) { await db.activityTemplates.update(templateId, patch) },
+  async updateTemplate(templateId, patch) { validateStampDesign(patch.stampKind); await db.activityTemplates.update(templateId, patch) },
   async deleteTemplate(templateId) { await db.activityTemplates.delete(templateId) },
   async saveExpense(expense) { await db.expenses.put(expense) },
   async deleteExpense(expenseId) { await db.expenses.delete(expenseId) },

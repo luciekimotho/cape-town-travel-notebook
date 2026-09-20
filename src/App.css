@@ -329,6 +329,17 @@ svg { display: block; }
 .danger { color: white; background: var(--error); border: 1px solid var(--error); }
 
 .settings-stack { display: grid; gap: 18px; }
+.sheet-readonly-fields { min-width: 0; padding: 0; margin: 0; border: 0; }
+.download-status ~ * button:disabled, .sheet-readonly-fields:disabled button, .sheet-readonly-fields:disabled input, .sheet-readonly-fields:disabled select, .sheet-readonly-fields:disabled textarea { cursor: not-allowed; }
+.download-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 8px 16px 12px; padding: 9px 12px; color: var(--teal); background: #e8efdf; border: 1px solid #b4c6a8; border-radius: 10px; font-size: 12px; }
+.download-status strong, .download-status small { display: block; }
+.download-status small { margin-top: 3px; font-size: 10px; color: var(--muted); }
+.download-status button { min-height: 44px; color: inherit; background: none; border: 0; text-decoration: underline; font: inherit; }
+.download-timestamp { margin: 8px 0; color: var(--teal); font-size: 12px; line-height: 1.5; }
+.download-actions { display: grid; gap: 8px; }
+.download-actions .save { margin-top: 0; }
+.download-actions .text-action { min-height: 44px; }
+.download-error { margin: 8px 0; color: var(--error); font-size: 12px; line-height: 1.5; }
 .settings-panel { margin-bottom: 0; padding: 18px; background: #fffcf4; border: 1px solid var(--line); border-radius: 17px; }
 .settings-panel-heading { display: flex; align-items: center; gap: 12px; margin-bottom: 19px; }
 .settings-panel-heading h3 { font-size: 24px; line-height: 1.1; }

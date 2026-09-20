@@ -1,10 +1,12 @@
 import JSZip from 'jszip'
 import { replaceAll } from './db'
+import { isStampDesign, validateNotebookStampDesigns } from './stampDesign'
 import type { AppData, BackupData, PhotoEntry } from './types'
 
 const photoPath = (photo: Pick<PhotoEntry, 'id' | 'mimeType'>) => `photos/${photo.id}.${photo.mimeType === 'image/png' ? 'png' : photo.mimeType === 'image/webp' ? 'webp' : 'jpg'}`
 
 export async function createBackup(data: AppData): Promise<Blob> {
+  validateNotebookStampDesigns(data)
   const zip = new JSZip()
   const metadata = data.metadata.filter(entry => entry.key !== 'schemaVersion')
   metadata.push({ key: 'schemaVersion', value: '4' })
@@ -37,6 +39,11 @@ function validateRecords(backup: Partial<Omit<BackupData, 'schemaVersion'>>) {
     metadata: value => isString(value.key) && isString(value.value),
   }
   for (const key of arrays) {
+    if (['places', 'items', 'activityTemplates', 'stamps'].includes(key) &&
+      !backup[key]!.every(item => item && typeof item === 'object' &&
+        (record(item).stampKind === undefined || isStampDesign(record(item).stampKind)))) {
+      throw new Error(`Backup field "${key}" contains an invalid stamp design.`)
+    }
     if (!backup[key]!.every(item => item && typeof item === 'object' && checks[key](record(item)))) {
       throw new Error(`Backup field "${key}" contains invalid records.`)
     }
