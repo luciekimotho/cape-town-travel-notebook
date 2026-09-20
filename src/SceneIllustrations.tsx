@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { ArtKind } from './Artwork'
+import type { StampKind } from './stampDesign'
 
 const ink = '#28262a'
 const cream = '#fff4de'
@@ -311,7 +311,7 @@ function NotebookScene() {
   </>
 }
 
-const scenes: Record<ArtKind, ReactNode> = {
+const scenes: Record<StampKind, ReactNode> = {
   mountain: <MountainScene/>,
   penguin: <PenguinScene/>,
   house: <HouseScene/>,
@@ -326,7 +326,7 @@ const scenes: Record<ArtKind, ReactNode> = {
   pin: <NotebookScene/>,
 }
 
-export function SceneIllustration({ kind, className }: { kind: ArtKind; className: string }) {
+export function SceneIllustration({ kind, className }: { kind: StampKind; className: string }) {
   return <svg className={className} data-scene={kind} viewBox="0 0 350 150" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
     <rect width="350" height="150" fill={cream}/>
     <circle cx="283" cy="31" r="19" fill={mustard}/>

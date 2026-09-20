@@ -2,12 +2,17 @@ import { SceneIllustration } from './SceneIllustrations'
 import type { ReactNode } from 'react'
 import type { StampDesign, StampKind } from './stampDesign'
 
-export type ArtKind = StampKind
+export type ArtKind = StampKind | 'home' | 'family' | 'dinner' | 'packing' | 'plane'
 
 const normalized = (name: string) => name.toLowerCase()
 
 export function artKindFor(name: string): ArtKind {
   const value = normalized(name)
+  if (value.includes('dinner with family') || value.includes('family dinner')) return 'dinner'
+  if (value.includes('hanging out with the kids') || value.includes('say goodbye') || value.includes('family time')) return 'family'
+  if (value.includes('final packing') || value.includes('packing and documents')) return 'packing'
+  if (value.includes('final home') || value.includes('travel preparations')) return 'home'
+  if (value.includes('airport') || value.includes('airlines') || value.includes('board et') || value.includes('flight') || value.includes('nbo check-in')) return 'plane'
   if (value.includes('penguin') || value.includes('boulders')) return 'penguin'
   if (value.includes('lighthouse') || value.includes('cape point')) return 'lighthouse'
   if (value.includes('muizenberg')) return 'huts'
@@ -23,6 +28,9 @@ export function artKindFor(name: string): ArtKind {
 }
 
 export function colorForKind(kind: ArtKind) {
+  if (kind === 'family' || kind === 'dinner') return '#bc3557'
+  if (kind === 'home') return '#315f2e'
+  if (kind === 'packing') return '#2855a6'
   if (kind === 'house') return '#bc3557'
   if (kind === 'penguin' || kind === 'cape' || kind === 'promenade') return '#2855a6'
   if (kind === 'lighthouse' || kind === 'cliff') return '#315f2e'
@@ -45,6 +53,11 @@ const markerFills: Record<ArtKind, ReactNode> = {
   wine: <><path d="M49 29h32l-3 26a13 13 0 0 1-26 0Z" fill="#fffaf0"/><path d="M51 43h28l-1 12a13 13 0 0 1-26 0Z" fill="#e95070"/><circle cx="32" cy="63" r="4" fill="#2855a6"/><circle cx="25" cy="68" r="4" fill="#2855a6"/><circle cx="34" cy="72" r="4" fill="#2855a6"/><path d="m92 62 12-22q-18 0-12 22Z" fill="#4e8548"/></>,
   cliff: <><path d="m16 77 28-20 16-28 14 7 13 32 25 10Z" fill="#4e8548"/><path d="m60 29 1 33-18 15H16l28-20Z" fill="#008c95"/><path d="M15 87q14-7 28 0t28 0t28 0v11H15Z" fill="#2855a6"/></>,
   pin: <><path d="M78 48c0 18-23 39-23 39S32 66 32 48a23 23 0 0 1 46 0Z" fill="#e95070"/><path d="M47 39h16v21H47Z" fill="#fffaf0"/><path d="M88 76l10-7 10 4 9-8v19H88Z" fill="#e7a928"/></>,
+  home: <><path d="M24 54 64 24l40 30v31H24Z" fill="#4e8548"/><path d="M50 85V60h28v25Z" fill="#fffaf0"/><path d="M64 65c-9-10-21 2 0 16 21-14 9-26 0-16Z" fill="#e95070"/></>,
+  family: <><circle cx="50" cy="39" r="10" fill="#e7a928"/><circle cx="78" cy="39" r="10" fill="#008c95"/><circle cx="38" cy="62" r="7" fill="#2855a6"/><circle cx="90" cy="62" r="7" fill="#e95070"/><path d="M33 86c0-18 11-29 23-29s17 10 17 29Z" fill="#008c95"/><path d="M61 86c0-19 8-29 21-29 12 0 22 11 22 29Z" fill="#e7a928"/><path d="M64 60c-8-9-19 2 0 14 19-12 8-23 0-14Z" fill="#e95070"/></>,
+  dinner: <><ellipse cx="64" cy="65" rx="37" ry="15" fill="#e7a928"/><ellipse cx="64" cy="62" rx="27" ry="10" fill="#fffaf0"/><path d="M34 79v11m60-11v11M24 37v28m8-28v28m-8-17h8M103 37v53" stroke="#2855a6" strokeWidth="5"/><path d="M54 49q-8-10 0-18m13 18q-8-10 0-18m13 18q-8-10 0-18" fill="none" stroke="#e95070" strokeWidth="3"/></>,
+  packing: <><rect x="31" y="43" width="67" height="44" rx="8" fill="#2855a6"/><path d="M49 43V32h30v11" fill="none" stroke="#008c95" strokeWidth="7"/><path d="M64 43v44M31 63h67" stroke="#fffaf0" strokeWidth="4"/><rect x="78" y="24" width="28" height="36" rx="3" fill="#e7a928"/><path d="M84 32h16m-16 8h11" stroke="#fffaf0" strokeWidth="3"/></>,
+  plane: <><path d="m17 66 40-8 23-31 10 2-11 32 27 10-4 8-31-4-16 18-9-2 7-20-32 3Z" fill="#008c95"/><path d="M20 88q24-8 44 0t44 0" fill="none" stroke="#2855a6" strokeWidth="4"/></>,
 }
 
 export function MarkerIcon({ kind, className, colorful = false }: { kind: ArtKind; className?: string; colorful?: boolean }) {
@@ -62,11 +75,18 @@ export function MarkerIcon({ kind, className, colorful = false }: { kind: ArtKin
     {kind === 'wine' && <><path d="M49 29h32l-3 26a13 13 0 0 1-26 0ZM52 43h25M65 68v18m-12 0h24M21 72l18-24m51 18 14-26"/><circle cx="32" cy="63" r="4"/><circle cx="25" cy="68" r="4"/><circle cx="34" cy="72" r="4"/></>}
     {kind === 'cliff' && <path d="m16 77 28-20 16-28 14 7 13 32 25 10M59 31l2 31-18 15M76 51l-2 21M15 87q14-7 28 0t28 0t28 0"/>}
     {kind === 'pin' && <><path d="M78 48c0 18-23 39-23 39S32 66 32 48a23 23 0 0 1 46 0Z"/><path d="M47 39h16v21H47zm5 0v-6h7v6M88 76l10-7 10 4 9-8M88 84h29"/></>}
+    {kind === 'home' && <><path d="M20 55 64 22l44 33M28 50v38h72V50M51 88V61h26v27"/><path d="M64 67c-8-10-21 2 0 15 21-13 8-25 0-15Z"/></>}
+    {kind === 'family' && <><circle cx="50" cy="38" r="9"/><circle cx="79" cy="38" r="9"/><circle cx="37" cy="64" r="6"/><circle cx="92" cy="64" r="6"/><path d="M24 88c1-21 13-32 27-32 9 0 14 5 18 13m35 19c-1-21-13-32-27-32-9 0-14 5-18 13"/><path d="M64 61c-8-9-19 2 0 14 19-12 8-23 0-14Z"/></>}
+    {kind === 'dinner' && <><ellipse cx="64" cy="65" rx="37" ry="15"/><ellipse cx="64" cy="62" rx="27" ry="10"/><path d="M34 79v11m60-11v11M24 36v31m8-31v31m-8-17h8m71-14v54M54 49q-8-10 0-18m13 18q-8-10 0-18m13 18q-8-10 0-18"/></>}
+    {kind === 'packing' && <><rect x="31" y="43" width="67" height="44" rx="8"/><path d="M49 43V32h30v11M64 43v44M31 63h67"/><rect x="78" y="24" width="28" height="36" rx="3"/><path d="M84 32h16m-16 8h11"/></>}
+    {kind === 'plane' && <><path d="m17 66 40-8 23-31 10 2-11 32 27 10-4 8-31-4-16 18-9-2 7-20-32 3ZM20 88q24-8 44 0t44 0"/></>}
   </svg>
 }
 
 export function PlaceScene({ name, className = 'landscape' }: { name: string; className?: string }) {
-  return <SceneIllustration kind={artKindFor(name)} className={className}/>
+  const kind = artKindFor(name)
+  const sceneKind: StampKind = kind === 'home' || kind === 'family' || kind === 'dinner' || kind === 'packing' || kind === 'plane' ? 'pin' : kind
+  return <SceneIllustration kind={sceneKind} className={className}/>
 }
 
 export function PlaceThumbnail({ name }: { name: string }) {

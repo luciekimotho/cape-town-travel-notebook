@@ -28,14 +28,29 @@ describe('Cape Town current itinerary activity', () => {
     expect(currentItineraryState(notebook, new Date('2026-09-21T21:59:00Z')).itemId).toBe('second')
   })
 
-  it('ignores children, missing and invalid times', () => {
+  it('keeps the parent current and identifies the latest timed child', () => {
     const notebook = data([
       item('parent', '09:00', 1),
-      item('child', '12:00', 2, { parentId: 'parent' }),
+      item('child-first', '10:00', 2, { parentId: 'parent' }),
+      item('child-second', '12:00', 3, { parentId: 'parent' }),
       item('untimed', undefined, 3),
       item('invalid', '25:00', 4),
     ])
-    expect(currentItineraryState(notebook, new Date('2026-09-21T12:00:00Z')).itemId).toBe('parent')
+    expect(currentItineraryState(notebook, new Date('2026-09-21T09:30:00Z')))
+      .toMatchObject({ itemId: 'parent', childItemId: 'child-first' })
+    expect(currentItineraryState(notebook, new Date('2026-09-21T10:00:00Z')))
+      .toMatchObject({ itemId: 'parent', childItemId: 'child-second' })
+  })
+
+  it('does not mark future, untimed or invalid children current', () => {
+    const notebook = data([
+      item('parent', '09:00', 1),
+      item('future', '12:00', 2, { parentId: 'parent' }),
+      item('untimed-child', undefined, 3, { parentId: 'parent' }),
+      item('invalid-child', '99:00', 4, { parentId: 'parent' }),
+    ])
+    expect(currentItineraryState(notebook, new Date('2026-09-21T07:30:00Z')))
+      .toMatchObject({ itemId: 'parent', childItemId: undefined })
   })
 
   it('uses stable position order when activities share a start', () => {

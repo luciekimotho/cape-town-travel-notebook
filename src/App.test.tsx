@@ -42,13 +42,20 @@ describe('current itinerary focus', () => {
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll })
     render(<NotebookApplication store={localNotebookStore} initialData={notebook} clock={() => new Date('2026-09-22T08:00:00Z')}/>)
     expect(screen.getByRole('button', { name: /22/ })).toHaveAttribute('aria-pressed', 'true')
-    const current = screen.getByRole('button', { current: 'time' })
-    expect(current).toHaveTextContent('Now')
-    expect(current).toHaveTextContent('Red Bus & Table Mountain')
-    expect(current.querySelector('time.activity-time')).toHaveTextContent('09:00')
-    expect(current.querySelector('time.activity-time')).toHaveAttribute('datetime', '09:00')
-    const firstStop = screen.getByRole('button', { name: /09:15.*Cape Town Red Bus/ })
+    const currentButtons = screen.getAllByRole('button', { current: 'time' })
+    expect(currentButtons).toHaveLength(1)
+    const parent = screen.getByRole('button', { name: /09:00.*Red Bus & Table Mountain/ })
+    const firstStop = currentButtons[0]
+    expect(parent).not.toHaveTextContent('Now')
+    expect(parent).not.toHaveAttribute('aria-current')
+    expect(parent.querySelector('time.activity-time')).toHaveTextContent('09:00')
+    expect(parent.querySelector('time.activity-time')).toHaveAttribute('datetime', '09:00')
+    expect(parent).not.toHaveTextContent('›')
+    expect(firstStop).toHaveAccessibleName(/09:15.*Cape Town Red Bus/)
+    expect(firstStop).not.toHaveTextContent('Now')
+    expect(screen.queryByText('Now')).not.toBeInTheDocument()
     expect(firstStop.querySelector('time.route-time')).toHaveTextContent('09:15')
+    expect(firstStop).not.toHaveTextContent('›')
     expect(scroll).toHaveBeenCalledOnce()
     expect(scroll).toHaveBeenCalledWith({ block: 'center', behavior: 'smooth' })
     fireEvent.click(screen.getByRole('button', { name: /23/ }))
@@ -57,11 +64,21 @@ describe('current itinerary focus', () => {
     animation.mockRestore()
   })
 
+  it('keeps the parent current only until its first timed child starts', async () => {
+    const notebook = await loadData()
+    render(<NotebookApplication store={localNotebookStore} initialData={notebook} clock={() => new Date('2026-09-22T07:05:00Z')}/>)
+    const current = screen.getByRole('button', { current: 'time' })
+    expect(current).toHaveTextContent('Red Bus & Table Mountain')
+    expect(current).not.toHaveTextContent('Now')
+    expect(screen.getByRole('button', { name: /09:15.*Cape Town Red Bus/ })).not.toHaveAttribute('aria-current')
+  })
+
   it('updates at a start boundary and on visibility without stealing the selected day', async () => {
     let now = new Date('2026-09-22T08:59:10Z')
     const notebook = await loadData()
     render(<NotebookApplication store={localNotebookStore} initialData={notebook} clock={() => now}/>)
-    expect(screen.getByRole('button', { current: 'time' })).toHaveTextContent('Red Bus & Table Mountain')
+    expect(screen.getAllByRole('button', { current: 'time' })).toHaveLength(1)
+    expect(screen.getByRole('button', { current: 'time' })).toHaveTextContent('Cape Town Red Bus')
     now = new Date('2026-09-22T09:00:00Z')
     act(() => window.dispatchEvent(new Event('focus')))
     expect(screen.getByRole('button', { current: 'time' })).toHaveTextContent('Afternoon plan')
@@ -75,7 +92,7 @@ describe('current itinerary focus', () => {
     const notebook = await loadData()
     const store = { ...localNotebookStore, kind: 'download' as const, readOnly: true }
     render(<NotebookApplication store={store} initialData={notebook} clock={() => new Date('2026-09-22T08:00:00Z')}/>)
-    expect(screen.getByRole('button', { current: 'time' })).toHaveTextContent('Now')
+    expect(screen.getAllByRole('button', { current: 'time' })).toHaveLength(1)
     expect(screen.getByText('Downloaded trip · read-only')).toBeInTheDocument()
   })
 })
@@ -398,7 +415,7 @@ describe('remaining production surfaces', () => {
     expect(screen.queryByText('Preparation')).not.toBeInTheDocument()
     expect(screen.queryByText('Create an offline backup')).not.toBeInTheDocument()
     expect(screen.getAllByRole('group').map(section => section.querySelector('summary')?.textContent)).toEqual([
-      'Planning0/1','Documents0/2','Shopping0/3',
+      'Planning1 item · 0 done','Documents2 items · 0 done','Shopping3 items · 0 done',
     ])
     expect(screen.getByText('Shopping')).toBeInTheDocument()
     expect(screen.getByText('Sneakers', { selector:'strong' })).toBeInTheDocument()
@@ -432,6 +449,30 @@ describe('remaining production surfaces', () => {
     fireEvent.click(screen.getByRole('button',{name:'Save expense'}))
     await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(await db.expenses.get(original.id)).toMatchObject({date:'2026-09-22',amount:150})
+  })
+
+  it('shows one KES trip total using each expense recorded rate snapshot', async () => {
+    await initializeDatabase()
+    const createdAt = new Date().toISOString()
+    await db.rateSets.bulkAdd([
+      { id:'rates-a',label:'Recorded A',effectiveDate:'2026-09-20',kesPerKes:1,kesPerUsd:130,kesPerZar:7,active:false,example:false,createdAt },
+      { id:'rates-b',label:'Recorded B',effectiveDate:'2026-09-21',kesPerKes:1,kesPerUsd:140,kesPerZar:8,active:false,example:false,createdAt },
+    ])
+    await db.expenses.bulkAdd([
+      { id:'kes-cost',amount:1000,currency:'KES',date:'2026-09-21',category:'Transport',createdAt,updatedAt:createdAt },
+      { id:'usd-cost',amount:10,currency:'USD',date:'2026-09-22',category:'Activity',rateSetId:'rates-a',createdAt,updatedAt:createdAt },
+      { id:'zar-cost',amount:100,currency:'ZAR',date:'2026-09-23',category:'Food',rateSetId:'rates-b',createdAt,updatedAt:createdAt },
+      { id:'missing-rate',amount:5,currency:'USD',date:'2026-09-24',category:'Other',createdAt,updatedAt:createdAt },
+    ])
+    await renderApp()
+    fireEvent.click(screen.getByRole('button', { name:'Costs' }))
+    const total = screen.getByText('Trip total in KES').closest('.total-card') as HTMLElement
+    expect(within(total).getByText(/3,100/)).toBeInTheDocument()
+    expect(within(total).getByText('Ksh 1,000.00')).toBeInTheDocument()
+    expect(within(total).getByText('US$15.00')).toBeInTheDocument()
+    expect(within(total).getByText(/ZAR\s*100\.00/)).toBeInTheDocument()
+    expect(within(total).getByRole('alert')).toHaveTextContent('1 foreign expense is not included')
+    expect(document.querySelector('.expense-list svg')).not.toBeInTheDocument()
   })
 })
 

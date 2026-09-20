@@ -19,6 +19,7 @@ describe('postcard names', () => {
   it.each(names)('preserves the exact full identity inside the border: %s', name => {
     const { container } = render(<MomentPostcard name={name} date="2026-09-25" caption="Preview" onOpen={() => {}}/>)
     const border = container.querySelector('.postcard-stamp')!
+    expect(border.parentElement).toHaveClass('postcard-visual')
     expect(border.querySelector('.stamp-name')?.textContent).toBe(name.toUpperCase())
     expect(border.querySelector('.stamp-month')?.textContent).toBe('SEPT 2026')
     expect(border.querySelector('clipPath, textPath')).toBeNull()

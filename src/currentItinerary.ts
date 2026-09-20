@@ -3,6 +3,7 @@ import type { AppData, ItineraryItem } from './types'
 export interface CurrentItineraryState {
   dayId?: string
   itemId?: string
+  childItemId?: string
   localDate?: string
   localTime?: string
 }
@@ -60,5 +61,15 @@ export function currentItineraryState(data: AppData, now: Date): CurrentItinerar
   const latestTime = roots.filter(item => item.time! <= local.time).at(-1)?.time
   // For identical starts, the first stable itinerary entry wins.
   const current = latestTime ? roots.find(item => item.time === latestTime) : undefined
-  return { dayId: day.id, itemId: current?.id, localDate: local.date, localTime: local.time }
+  const children = current
+    ? data.items
+        .filter(item => item.parentId === current.id && item.dayId === day.id && validTime(item.time))
+        .sort((left, right) =>
+          left.time!.localeCompare(right.time!) ||
+          left.position - right.position ||
+          left.id.localeCompare(right.id))
+    : []
+  const latestChildTime = children.filter(item => item.time! <= local.time).at(-1)?.time
+  const currentChild = latestChildTime ? children.find(item => item.time === latestChildTime) : undefined
+  return { dayId: day.id, itemId: current?.id, childItemId: currentChild?.id, localDate: local.date, localTime: local.time }
 }

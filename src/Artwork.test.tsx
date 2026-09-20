@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { MarkerIcon, PlaceScene, PlaceThumbnail, TravelStamp, stampLayout, stampMonthLabel, stampTextLines, type ArtKind } from './Artwork'
+import { MarkerIcon, PlaceScene, PlaceThumbnail, TravelStamp, artKindFor, stampLayout, stampMonthLabel, stampTextLines } from './Artwork'
+import type { StampKind } from './stampDesign'
 
 describe('travel stamp artwork', () => {
   it('shows only the visit month and year', () => {
@@ -48,7 +49,7 @@ describe('travel stamp artwork', () => {
 
 describe('place scene artwork', () => {
   it('renders each scene family, including a neutral fallback', () => {
-    const samples: Record<ArtKind, string> = {
+    const samples: Record<StampKind, string> = {
       mountain: 'Table Mountain',
       penguin: 'Boulders Penguins',
       house: 'Bo-Kaap',
@@ -78,6 +79,22 @@ describe('place scene artwork', () => {
     }
     const rendered = Object.values(samples).map(name => renderToStaticMarkup(<PlaceScene name={name}/>))
     expect(new Set(rendered).size).toBe(12)
+  })
+
+  it('uses expressive preflight marker families without inventing location scenes', () => {
+    const samples = {
+      home: 'Final travel preparations',
+      family: 'Hanging out with the kids',
+      dinner: 'Dinner with family',
+      packing: 'Final packing and documents',
+      plane: 'Board Ethiopian Airlines ET309',
+    } as const
+    for (const [kind, name] of Object.entries(samples)) {
+      expect(artKindFor(name)).toBe(kind)
+      expect(renderToStaticMarkup(<PlaceThumbnail name={name}/>)).toContain(`data-thumbnail="${kind}"`)
+      expect(renderToStaticMarkup(<MarkerIcon kind={kind as keyof typeof samples} colorful/>)).toContain(`data-marker-fill="${kind}"`)
+      expect(renderToStaticMarkup(<PlaceScene name={name}/>)).toContain('data-scene="pin"')
+    }
   })
 
   it('keeps unknown places neutral and preserves custom sizing classes', () => {
