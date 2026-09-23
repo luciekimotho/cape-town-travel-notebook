@@ -14,8 +14,10 @@ export class CloudNotebookStore implements NotebookStore {
   readOnly = false
   onUnavailable?: (error: unknown) => void
   readonly tripId: string
-  private readonly repository: CloudNotebookRepository
+  private repository: CloudNotebookRepository
   private snapshot?: AppData
+  private snapshotComplete = false
+  onSnapshot?: (notebook: AppData) => void
 
   constructor(tripId: string, client?: SupabaseClient) {
     this.tripId = tripId
@@ -28,8 +30,38 @@ export class CloudNotebookStore implements NotebookStore {
 
   async load(client?: SupabaseClient) {
     requireOnline()
-    this.snapshot = await (client ? new CloudNotebookRepository(this.tripId, client) : this.repository).load()
+    if (client) this.repository = new CloudNotebookRepository(this.tripId, client)
+    this.snapshot = await this.repository.load(this.snapshot?.photos)
+    this.snapshotComplete = true
+    this.onSnapshot?.(this.snapshot)
     return this.snapshot
+  }
+
+  async loadProgressive(
+    client: SupabaseClient,
+    onStructured: (notebook: AppData) => void,
+    onPhoto?: (notebook: AppData) => void,
+    reusablePhotos: PhotoEntry[] = this.snapshot?.photos ?? [],
+    signal?: AbortSignal,
+  ) {
+    requireOnline()
+    this.repository = new CloudNotebookRepository(this.tripId, client)
+    const notebook = await this.repository.loadProgressive(reusablePhotos, partial => {
+      this.snapshot = partial
+      this.snapshotComplete = false
+      onStructured(partial)
+    }, photo => {
+      if (!this.snapshot) return
+      this.snapshot = {
+        ...this.snapshot,
+        photos:[...this.snapshot.photos.filter(candidate => candidate.id !== photo.id), photo],
+      }
+      onPhoto?.(this.snapshot)
+    }, signal)
+    this.snapshot = notebook
+    this.snapshotComplete = true
+    this.onSnapshot?.(notebook)
+    return notebook
   }
 
   private async saved(operation: () => Promise<{ notebook?: AppData; cleanupWarning?: string }>) {
@@ -46,6 +78,8 @@ export class CloudNotebookStore implements NotebookStore {
     const notebook = result.notebook ?? this.snapshot
     if (!notebook) throw new Error('The change was saved, but the notebook must be reloaded before continuing.')
     this.snapshot = notebook
+    if (result.notebook) this.snapshotComplete = true
+    if (this.snapshotComplete) this.onSnapshot?.(notebook)
     return result.cleanupWarning
       ? { notebook, warning:result.cleanupWarning }
       : notebook

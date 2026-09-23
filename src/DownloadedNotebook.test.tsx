@@ -17,14 +17,15 @@ const controls = (): DownloadControls => ({
   onRemove: vi.fn().mockResolvedValue(undefined),
   onReturnLive: vi.fn(),
 })
+const tripClock = () => new Date('2026-09-21T08:00:00Z')
 
 describe('downloaded notebook browsing', () => {
   it('retains all five tabs and disables mutation entry points', async () => {
     const notebook = await loadData()
     const store: NotebookStore = { ...localNotebookStore, kind: 'download', readOnly: true }
     const write = vi.spyOn(store, 'saveItineraryDetails')
-    render(<NotebookApplication store={store} initialData={notebook} downloads={controls()}/>)
-    expect(screen.getByText('Downloaded trip · read-only')).toBeInTheDocument()
+    render(<NotebookApplication store={store} initialData={notebook} downloads={controls()} clock={tripClock}/>)
+    expect(screen.getByText('Offline copy · read-only')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Add activity' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: /Arrive in Cape Town/ }))
     expect(screen.getByRole('button', { name: 'Edit' })).toBeDisabled()
@@ -58,17 +59,17 @@ describe('downloaded notebook browsing', () => {
     const notebook = await loadData()
     const store: NotebookStore = { ...localNotebookStore }
     const save = vi.spyOn(store, 'saveItineraryDetails')
-    const view = render(<NotebookApplication store={store} initialData={notebook}/>)
+    const view = render(<NotebookApplication store={store} initialData={notebook} clock={tripClock}/>)
     fireEvent.click(screen.getByRole('button', { name: /Arrive in Cape Town/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
     fireEvent.change(screen.getByLabelText('Name *'), { target: { value: 'Unsaved travel plan' } })
-    view.rerender(<NotebookApplication store={store} initialData={notebook} readOnly/>)
+    view.rerender(<NotebookApplication store={store} initialData={notebook} readOnly clock={tripClock}/>)
     expect(screen.getByLabelText('Name *')).toHaveValue('Unsaved travel plan')
     expect(screen.getByLabelText('Name *')).toBeDisabled()
     fireEvent.submit(screen.getByRole('dialog').querySelector('form')!)
     expect(save).not.toHaveBeenCalled()
     expect(screen.getByRole('alert')).toHaveTextContent('read-only')
-    view.rerender(<NotebookApplication store={store} initialData={notebook}/>)
+    view.rerender(<NotebookApplication store={store} initialData={notebook} clock={tripClock}/>)
     expect(screen.getByLabelText('Name *')).toBeEnabled()
     expect(screen.getByLabelText('Name *')).toHaveValue('Unsaved travel plan')
   })
@@ -90,6 +91,16 @@ describe('downloaded notebook browsing', () => {
     view.unmount()
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:offline-photo')
   })
+
+  it('shows a compact retry action when background synchronization fails', async () => {
+    const notebook = await loadData()
+    const retry = vi.fn()
+    render(<NotebookApplication store={localNotebookStore} initialData={notebook} clock={tripClock}
+      downloads={{ ...controls(), syncError:'Some photos could not refresh.', onRetry:retry }}/>)
+    expect(screen.getByRole('alert')).toHaveTextContent('Some photos could not refresh.')
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name:'Retry' }))
+    expect(retry).toHaveBeenCalledOnce()
+  })
 })
 
 describe('download controls', () => {
@@ -98,14 +109,14 @@ describe('download controls', () => {
     actions.downloading = true
     actions.progress = 'Downloading photo 2 of 3'
     const view = render(<DownloadSettings controls={actions}/>)
-    expect(screen.getByRole('button', { name: 'Update download' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Verify photos for offline use' })).toBeDisabled()
     expect(screen.getByRole('status')).toHaveTextContent('photo 2 of 3')
     actions.downloading = false
     actions.onDownload = vi.fn().mockRejectedValue(new Error('Storage quota exceeded'))
     view.rerender(<DownloadSettings controls={actions}/>)
-    fireEvent.click(screen.getByRole('button', { name: 'Update download' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('Storage quota exceeded')
-    expect(screen.getByText(/Last downloaded/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Verify photos for offline use' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Free some storage')
+    expect(screen.getByText(/Offline copy ready/)).toBeInTheDocument()
   })
 
   it('confirms removing the local copy and surfaces storage errors', async () => {
@@ -117,6 +128,6 @@ describe('download controls', () => {
     expect(actions.onRemove).not.toHaveBeenCalled()
     vi.mocked(window.confirm).mockReturnValue(true)
     fireEvent.click(screen.getByRole('button', { name: 'Remove downloaded copy' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('Could not remove download')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Check your connection and device storage')
   })
 })

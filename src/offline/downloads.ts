@@ -12,6 +12,7 @@ export interface DownloadedTrip {
   tripId: string
   savedAt: string
   revision?: string
+  source?: 'automatic' | 'explicit'
   notebook: AppData
 }
 
@@ -83,10 +84,33 @@ export function isAuthorizationError(error: unknown): boolean {
 function validateSnapshot(value: DownloadedTrip, userId: string, tripId: string): void {
   if (!value || value.schemaVersion !== DOWNLOAD_SCHEMA_VERSION || value.userId !== userId ||
     value.tripId !== tripId || typeof value.savedAt !== 'string' || !Number.isFinite(Date.parse(value.savedAt)) ||
-    (value.revision !== undefined && (typeof value.revision !== 'string' || !value.revision))) {
+    (value.revision !== undefined && (typeof value.revision !== 'string' || !value.revision)) ||
+    (value.source !== undefined && value.source !== 'automatic' && value.source !== 'explicit')) {
     throw new Error('The downloaded trip has an unsupported version or corrupt metadata. Download it again while online.')
   }
   validateDownloadedNotebook(value.notebook, tripId)
+}
+
+function notebookRevision(notebook: AppData): string {
+  return canonicalMetadata({
+    ...notebook,
+    photos:notebook.photos.map(({ blob: _blob, ...photo }) => photo),
+  })
+}
+
+async function storagePermission(operation: () => Promise<boolean>): Promise<'granted' | 'denied' | 'unsupported'> {
+  let timer: number | undefined
+  try {
+    const result = await Promise.race([
+      operation(),
+      new Promise<undefined>(resolve => { timer = window.setTimeout(resolve, 1_500) }),
+    ])
+    return result === undefined ? 'unsupported' : result ? 'granted' : 'denied'
+  } catch {
+    return 'unsupported'
+  } finally {
+    window.clearTimeout(timer)
+  }
 }
 
 /** No credentials are stored here. Identity must only be remembered after server verification. */
@@ -185,10 +209,18 @@ export class OfflineDownloads {
   }
 
   async getActive(): Promise<DownloadedTrip | undefined> {
-    return this.db.transaction('r', this.db.control, this.db.snapshots, async () => {
-      const state = await this.state()
-      if (!state?.identity) return undefined
-      return this.readSnapshot(state.identity.userId, state.identity.tripId)
+    return this.db.transaction('rw', this.db.control, this.db.snapshots, async () => {
+      let state = await this.state()
+      if (!state?.identity) {
+        const snapshots = await this.db.snapshots.toArray()
+        if (snapshots.length !== 1) return undefined
+        const [{ userId, tripId }] = snapshots
+        state = { key:'state', generation:crypto.randomUUID(), identity:{ userId, tripId } }
+        await this.db.control.put(state)
+      }
+      const identity = state.identity
+      if (!identity) return undefined
+      return this.readSnapshot(identity.userId, identity.tripId)
     })
   }
 
@@ -274,6 +306,51 @@ export class OfflineDownloads {
     this.checkLocalTicket(ticket)
   }
 
+  async persistenceStatus(): Promise<'granted' | 'denied' | 'unsupported'> {
+    if (!navigator.storage?.persisted) return 'unsupported'
+    return storagePermission(() => navigator.storage.persisted())
+  }
+
+  async requestPersistence(): Promise<'granted' | 'denied' | 'unsupported'> {
+    if (!navigator.storage?.persist) return 'unsupported'
+    return storagePermission(() => navigator.storage.persist())
+  }
+
+  async promote(
+    userId: string,
+    tripId: string,
+    notebook: AppData,
+    source: DownloadedTrip['source'] = 'automatic',
+  ): Promise<DownloadedTrip> {
+    requireIdentity(userId, tripId)
+    validateDownloadedNotebook(notebook, tripId)
+    const revision = notebookRevision(notebook)
+    const ticket = await this.begin(userId, tripId)
+    const snapshot: DownloadedTrip = {
+      schemaVersion:DOWNLOAD_SCHEMA_VERSION,
+      userId,
+      tripId,
+      savedAt:new Date().toISOString(),
+      revision,
+      source,
+      notebook:structuredClone(notebook),
+    }
+    await this.db.transaction('rw', this.db.control, this.db.leases, this.db.snapshots, async () => {
+      await this.checkTicket(ticket)
+      const existing = await this.db.snapshots.get([userId, tripId])
+      if (existing?.revision === revision && existing.source === 'explicit') {
+        snapshot.savedAt = existing.savedAt
+        snapshot.source = existing.source
+        snapshot.notebook = existing.notebook
+        return
+      }
+      await this.db.snapshots.put(snapshot)
+      this.checkLocalTicket(ticket)
+    })
+    this.checkLocalTicket(ticket)
+    return structuredClone(snapshot)
+  }
+
   async download(
     userId: string,
     tripId: string,
@@ -351,7 +428,7 @@ export class OfflineDownloads {
         validateDownloadedNotebook(notebook, tripId)
         const snapshot: DownloadedTrip = {
           schemaVersion: DOWNLOAD_SCHEMA_VERSION, userId, tripId, savedAt: new Date().toISOString(),
-          revision: crypto.randomUUID(), notebook,
+          revision: notebookRevision(notebook), source:'explicit', notebook,
         }
         onProgress?.('Saving this verified trip on this device…')
         await this.db.transaction('rw', this.db.control, this.db.leases, this.db.snapshots, async () => {

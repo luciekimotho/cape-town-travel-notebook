@@ -11,11 +11,15 @@ import { cloudSetupIssue } from './config'
 import { bounded, isConnectionError } from './connection'
 import { CloudNotebookStore } from './notebookStore'
 import { CloudNotebookRepository, createFreshTrip, listCloudTrips, type CloudTripSummary, type CollaborationStatus } from './repository'
+import { errorMessage } from '../errorMessage'
 
 type Status = 'checking' | 'ready' | 'network' | 'error' | 'auth'
 type LiveNotebook = { userId: string; trip: CloudTripSummary; store: CloudNotebookStore; notebook: AppData }
-const message = (error: unknown) => error instanceof Error ? error.message :
-  typeof error === 'object' && error && 'message' in error ? String(error.message) : 'The request failed. Please retry.'
+const guidance = (error: unknown, fallback = 'Try again. If the problem continues, reconnect and reopen the app.') =>
+  errorMessage(error, fallback)
+const mark = (name: string) => {
+  try { performance.mark(name) } catch { /* Performance marks are optional diagnostics. */ }
+}
 
 function hasOpenEditor(): boolean {
   return [...document.querySelectorAll<HTMLElement>('[role="dialog"]')].some(dialog => {
@@ -56,10 +60,12 @@ export default function CloudApp() {
   const [mode, setMode] = useState<'live' | 'download'>('live')
   const [collaboration, setCollaboration] = useState<CollaborationStatus>()
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState(consumeAuthCallbackError)
+  const [error, setError] = useState(() =>
+    consumeAuthCallbackError() ? 'Request a fresh sign-in code, then try again.' : '')
   const [downloadError, setDownloadError] = useState('')
   const [downloading, setDownloading] = useState(false)
   const [progress, setProgress] = useState('')
+  const [persistence, setPersistence] = useState<'granted' | 'denied' | 'unsupported'>()
   const [retry, setRetry] = useState(0)
   const [online, setOnline] = useState(navigator.onLine)
   const generation = useRef(0)
@@ -104,7 +110,7 @@ export default function CloudApp() {
         cachedRef.current = undefined
         setCached(undefined)
         setCacheLoaded(true)
-        setCacheError(`Downloaded trip storage: ${message(error)}`)
+        setCacheError(guidance(error, 'Reconnect and refresh the offline copy in Settings.'))
       })
     })
     return () => { active = false; latestRead++; unsubscribe() }
@@ -116,21 +122,24 @@ export default function CloudApp() {
     const client = getCloudClient()
     const initialVersion = authVersion.current
     const initialCacheEpoch = cacheEpoch.current
+    mark('notebook-cache-read-start')
     startupCache.current = bounded(offlineDownloads.getActive())
     void startupCache.current.then(snapshot => {
       if (!active || explicitlySigningOut.current || initialCacheEpoch !== cacheEpoch.current) return
       cachedRef.current = snapshot
       setCached(snapshot)
       if (!navigator.onLine) setMode('download')
-    }).catch(error => { if (active) setCacheError(`Downloaded trip storage: ${message(error)}`) })
+      mark(snapshot ? 'notebook-cache-hit' : 'notebook-cache-miss')
+    }).catch(error => { if (active) setCacheError(guidance(error, 'Reconnect and refresh the offline copy in Settings.')) })
       .finally(() => { if (active) setCacheLoaded(true) })
+    void offlineDownloads.persistenceStatus().then(result => { if (active) setPersistence(result) })
     const lookup = currentSession()
     sessionLookup.current = lookup
     void bounded(lookup).then(next => {
       if (active && authVersion.current === initialVersion) setSession(next)
     }).catch(error => {
       if (!active || authVersion.current !== initialVersion) return
-      setError(message(error))
+      setError(guidance(error, 'Sign in again, then retry.'))
       setStatus(isConnectionError(error) ? 'network' : 'auth')
       if (isConnectionError(error)) setMode('download')
       else setSession(null)
@@ -174,6 +183,7 @@ export default function CloudApp() {
     let active = true
     const current = () => active && version === generation.current && !explicitlySigningOut.current
     const client = cancellableClient(getCloudClient(), controller.signal)
+    let structuredLoaded = false
     if (liveRef.current) liveRef.current.store.readOnly = true
     setStatus('checking')
     setDownloading(false); setProgress('')
@@ -193,7 +203,7 @@ export default function CloudApp() {
         if (!current()) return
         if (result.error) {
           if (isConnectionError(result.error)) throw result.error
-          throw Object.assign(new Error(message(result.error)), { status: result.error.status === 403 ? 403 : 401 })
+          throw Object.assign(new Error(result.error.message), { status: result.error.status === 403 ? 403 : 401 })
         }
         if (!result.data.user) throw Object.assign(new Error('Please sign in again to verify your account.'), { status: 401 })
         const verifiedId = result.data.user.id
@@ -238,8 +248,27 @@ export default function CloudApp() {
         const existing = liveRef.current
         if (!existing || existing.userId !== verifiedId || existing.trip.id !== trip.id || returnRequested.current) {
           const store = new CloudNotebookStore(trip.id)
-          const notebook = await bounded(store.load(client), controller)
+          const promote = (notebook: AppData) => {
+            const epoch = cacheEpoch.current
+            void offlineDownloads.promote(verifiedId, trip.id, notebook).then(snapshot => {
+              if (!current() || epoch !== cacheEpoch.current) return
+              cachedRef.current = snapshot
+              setCached(snapshot)
+            }).catch(storageError => {
+              if (current()) setDownloadError(guidance(storageError, 'Open Settings and verify the offline copy again.'))
+            })
+          }
+          store.onSnapshot = promote
+          const notebook = await store.loadProgressive(getCloudClient(), partial => {
+            if (!current()) return
+            structuredLoaded = true
+            mark('notebook-structured-ready')
+            setLive({ userId:verifiedId, trip, store, notebook:partial })
+          }, partial => {
+            if (current()) setLive({ userId:verifiedId, trip, store, notebook:partial })
+          }, snapshot?.notebook.photos ?? [], controller.signal)
           if (!current()) return
+          mark('notebook-photos-ready')
           setLive({ userId: verifiedId, trip, store, notebook })
         } else {
           existing.store.readOnly = false
@@ -248,16 +277,21 @@ export default function CloudApp() {
         setStatus('ready'); setError('')
         void bounded(new CloudNotebookRepository(trip.id, client).collaborationStatus(), controller)
           .then(result => { if (current()) setCollaboration(result) })
-          .catch(error => { if (current()) setError(message(error)) })
+          .catch(error => { if (current()) setError(guidance(error)) })
       } catch (error) {
         if (!current()) return
-        setError(message(error))
+        if (structuredLoaded && !isAuthorizationError(error) && !membershipDenied(error)) {
+          setStatus('ready')
+          setError('Your itinerary is ready. Check your connection and tap Retry to refresh photos.')
+          return
+        }
+        setError(guidance(error))
         if (isAuthorizationError(error) || membershipDenied(error)) {
           setLive(undefined); setCached(undefined); setStatus('auth')
           // Authentication expiry is not a revocation. Only confirmed access denial purges.
           if (membershipDenied(error)) {
             cacheEpoch.current++
-            try { await offlineDownloads.invalidateUser(userId!) } catch (storageError) { setCacheError(message(storageError)) }
+            try { await offlineDownloads.invalidateUser(userId!) } catch (storageError) { setCacheError(guidance(storageError, 'Reconnect and refresh the offline copy in Settings.')) }
           }
         } else if (isConnectionError(error)) {
           setStatus('network')
@@ -282,7 +316,7 @@ export default function CloudApp() {
       setCached(undefined); setLive(undefined); setSession(null); setMode('live')
       setCollaboration(undefined); setError(''); setCacheError(''); setStatus('auth')
     } catch (error) {
-      setCacheError(`Sign out could not be completed: ${message(error)}. Retry clearing this device.`)
+      setCacheError('Reconnect, then try signing out again.')
       setStatus('error')
       throw error
     } finally { explicitlySigningOut.current = false; setBusy(false); setDownloading(false) }
@@ -301,7 +335,7 @@ export default function CloudApp() {
     try {
       await offlineDownloads.remove(snapshot.userId, snapshot.tripId)
       setCached(undefined); setDownloadError('')
-    } catch (error) { setDownloadError(message(error)); throw error }
+    } catch (error) { setDownloadError(guidance(error, 'Try removing the offline copy again.')); throw error }
   }
   const download = async () => {
     if (!live || status !== 'ready' || !navigator.onLine) return
@@ -309,24 +343,30 @@ export default function CloudApp() {
     const epoch = cacheEpoch.current
     setDownloading(true); setDownloadError(''); setProgress('Preparing download…')
     try {
+      const storageResult = await offlineDownloads.requestPersistence()
+      if (version === generation.current) setPersistence(storageResult)
       const snapshot = await offlineDownloads.download(live.userId, live.trip.id, getCloudClient(), text => {
         if (version === generation.current) setProgress(text)
       })
       if (version === generation.current && epoch === cacheEpoch.current) setCached(snapshot)
     } catch (error) {
       if (version !== generation.current) return
-      setDownloadError(message(error))
+      setDownloadError(guidance(error, 'Check your connection and device storage, then try again.'))
       if (isAuthorizationError(error) || membershipDenied(error)) {
         live.store.readOnly = true; setStatus('auth'); setCached(undefined); setLive(undefined)
         if (membershipDenied(error)) {
           cacheEpoch.current++
-          try { await offlineDownloads.invalidateUser(live.userId) } catch (storageError) { setCacheError(message(storageError)) }
+          try { await offlineDownloads.invalidateUser(live.userId) } catch (storageError) { setCacheError(guidance(storageError, 'Reconnect and refresh the offline copy in Settings.')) }
         }
       }
     } finally { if (version === generation.current) { setDownloading(false); setProgress('') } }
   }
   const downloads: DownloadControls = {
-    savedAt: cached?.savedAt, downloading, progress, error: [cacheError, downloadError, error].filter(Boolean).join(' ') || undefined,
+    savedAt: cached?.savedAt, source:cached?.source, persistence,
+    refreshing:Boolean(cached && online && !live && status === 'checking'),
+    downloading, progress,
+    error:[cacheError, downloadError].filter(Boolean).join(' ') || undefined,
+    syncError:live && error ? error : undefined,
     onDownload: live && status === 'ready' && online && mode === 'live' ? download : undefined,
     onRemove: removeDownload,
     onUseDownload: cached && mode === 'live' ? () => {
@@ -336,18 +376,19 @@ export default function CloudApp() {
       returnRequested.current = true
       retryLive()
     } : undefined,
+    onRetry:online ? retryLive : undefined,
     onSignOut: logout,
   }
 
   if (live) {
     live.store.readOnly = status !== 'ready' || !online || mode === 'download'
     live.store.onUnavailable = error => {
-      setError(message(error))
+      setError(guidance(error))
       if (isAuthorizationError(error) || membershipDenied(error)) {
         setStatus('auth'); setLive(undefined); setCached(undefined)
         if (membershipDenied(error)) {
           cacheEpoch.current++
-          void offlineDownloads.invalidateUser(live.userId).catch(error => setCacheError(message(error)))
+          void offlineDownloads.invalidateUser(live.userId).catch(error => setCacheError(guidance(error, 'Reconnect and refresh the offline copy in Settings.')))
         }
       }
       else setStatus('network')
@@ -375,12 +416,16 @@ export default function CloudApp() {
 
   if (setupIssue) return <CloudEntry title="Cloud setup needed"><p>{setupIssue}</p></CloudEntry>
   // Auth failure while online must never be dressed up as a successful cached sign-in.
-  if (status !== 'auth' && mode === 'download' && cached && downloadStore &&
+  if (status !== 'auth' && cached && downloadStore && (mode === 'download' || !live) &&
     (!session || session.user.id === cached.userId)) {
-    return <NotebookApplication store={downloadStore} initialData={cached.notebook} readOnly downloads={downloads}/>
+    return <NotebookApplication key={`cache-${cached.userId}-${cached.tripId}-${cached.revision ?? cached.savedAt}`}
+      store={downloadStore} initialData={cached.notebook} readOnly
+      readOnlyReason={online ? 'Saved trip · refreshing latest changes…' : 'Offline copy · read-only'}
+      downloads={downloads}/>
   }
   if (live && status !== 'auth' && mode === 'live') {
-    return <NotebookApplication store={live.store} initialData={live.notebook} account={account}
+    return <NotebookApplication key={`live-${live.userId}-${live.trip.id}`}
+      store={live.store} initialData={live.notebook} account={account}
       readOnly={status !== 'ready' || !online}
       readOnlyReason="Connection unavailable or account verification pending. Your open work is kept here; no offline changes are saved."
       downloads={downloads}/>
@@ -391,7 +436,7 @@ export default function CloudApp() {
       {(cacheError || error) && <p role="alert">{cacheError || error}</p>}
       {online && <button className="save" onClick={() => { setMode('live'); returnRequested.current = true; retryLive() }}>Retry connection</button>}
       <button className="text-action" disabled={busy} onClick={() => void logout().catch(() => {})}>Sign out and clear this device</button>
-      {cacheError && <button onClick={() => void clearDownloads().catch(error => setCacheError(message(error)))}>Clear downloaded trips</button>}
+      {cacheError && <button onClick={() => void clearDownloads().catch(error => setCacheError(guidance(error, 'Reconnect, then try clearing this device again.')))}>Clear downloaded trips</button>}
     </CloudEntry>
   }
   if (status === 'auth' || session === null) {
@@ -406,13 +451,13 @@ export default function CloudApp() {
     <button className="save" onClick={retryLive}>Retry</button>
     <button disabled={busy} onClick={() => void logout().catch(() => {})}>Sign out and clear this device</button>
   </CloudEntry>
-  if (session === undefined || status === 'checking') return <CloudEntry title="Opening your notebook"><p>Checking your account and loading your shared trip…</p>{cacheError && <p role="alert">{cacheError}</p>}</CloudEntry>
+  if (session === undefined || status === 'checking') return <CloudEntry title="Opening your notebook"><div className="cloud-loading" role="status"><span/><span/><span/></div><p>Checking your account and loading your shared trip…</p>{cacheError && <p role="alert">{cacheError}</p>}</CloudEntry>
   return <CloudEntry title="Create your Cape Town notebook">
     <p>Signed in as <strong>{session?.user.email}</strong>. This creates the fresh 21–28 September 2026 plan once, without importing browser test data.</p>
     <button className="save cloud-create" disabled={busy} onClick={() => {
       if (status !== 'ready' || !navigator.onLine) return
       setBusy(true); setError('')
-      void bounded(createFreshTrip()).then(retryLive).catch(error => setError(message(error))).finally(() => setBusy(false))
+      void bounded(createFreshTrip()).then(retryLive).catch(error => setError(guidance(error))).finally(() => setBusy(false))
     }}>Create Cape Town 2026</button>
     <button className="text-action cloud-sign-out" disabled={busy} onClick={() => void logout().catch(() => {})}>Sign out</button>
     {(error || cacheError) && <p role="alert">{cacheError || error}</p>}

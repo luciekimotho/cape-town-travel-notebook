@@ -32,7 +32,7 @@ export function StampPicker({ name, value, date, disabled, onChange }: {
     <legend>Stamp design</legend>
     <div className="stamp-picker-preview">
       <TravelStamp name={name.trim() || 'Your place name'} date={date} stampKind={value}/>
-      <div><strong>{selected.label}</strong><p>Your place name stays on every design.</p></div>
+      <div><strong>{selected.label}</strong><p>Stamp style</p></div>
     </div>
     <details className="stamp-picker-options">
       <summary>Choose a design</summary>

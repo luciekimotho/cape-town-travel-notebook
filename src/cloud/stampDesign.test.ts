@@ -13,17 +13,18 @@ const notebook: AppData = {
   stamps:[{ id:'stamp', placeName:'Mountain', stampKind:'auto', itineraryItemId:'item', detached:false, visitDate:'2026-09-21', createdAt:timestamp }],
   checklist:[], days:[{ id:'day', date:'2026-09-21', outOfRange:false }], expenses:[], photos:[], rateSets:[], metadata:[],
 }
+const cloudNotebook = { ...notebook, schemaVersion:4 as const }
 
 describe('cloud stamp design protocol', () => {
   it('loads all optional choices through the design-aware RPC', async () => {
-    const rpc = vi.fn(async () => ({ data:notebook, error:null }))
-    expect(await loadCloudNotebook('trip', { rpc } as unknown as SupabaseClient)).toEqual(notebook)
+    const rpc = vi.fn(async () => ({ data:cloudNotebook, error:null }))
+    expect(await loadCloudNotebook('trip', { rpc } as unknown as SupabaseClient)).toEqual(cloudNotebook)
     expect(rpc).toHaveBeenCalledWith('load_notebook_v6', { p_trip_id:'trip' })
   })
 
   it.each(['places', 'items', 'activityTemplates', 'stamps'] as const)('rejects invalid cloud %s choices', async key => {
-    const client = { rpc:async () => ({ data:{ ...notebook, [key]:[{ ...notebook[key][0], stampKind:'bad' }] }, error:null }) } as unknown as SupabaseClient
-    await expect(loadCloudNotebook('trip', client)).rejects.toThrow('stamp design')
+    const client = { rpc:async () => ({ data:{ ...cloudNotebook, [key]:[{ ...notebook[key][0], stampKind:'bad' }] }, error:null }) } as unknown as SupabaseClient
+    await expect(loadCloudNotebook('trip', client)).rejects.toThrow('stampKind')
   })
 
   it('sends choices on every supported store pathway, and never sends stale stamp snapshots', async () => {
@@ -31,7 +32,7 @@ describe('cloud stamp design protocol', () => {
     const calls: Array<{ operation:unknown; payload:unknown }> = []
     const client = {
       rpc:async (name:string, args?:Record<string, unknown>) => {
-        if (name === 'load_notebook_v6') return { data:notebook, error:null }
+        if (name === 'load_notebook_v6') return { data:cloudNotebook, error:null }
         calls.push({ operation:args?.p_operation, payload:args?.p_payload })
         return { data:{ ok:true, operation:args?.p_operation }, error:null }
       },
@@ -61,7 +62,7 @@ describe('cloud stamp design protocol', () => {
     let payload: unknown
     const client = {
       rpc:async (name:string, args?:Record<string, unknown>) => {
-        if (name === 'load_notebook_v6') return { data:notebook, error:null }
+        if (name === 'load_notebook_v6') return { data:cloudNotebook, error:null }
         expect(name).toBe('restore_notebook_v3')
         payload = args?.p_payload
         return { data:{ ok:true, operation:'notebook.restore', objectPaths:[] }, error:null }

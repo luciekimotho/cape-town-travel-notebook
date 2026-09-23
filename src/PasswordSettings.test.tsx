@@ -57,7 +57,7 @@ describe('current-account password setup', () => {
     fireEvent.change(screen.getByLabelText('New password'), { target: { value: '123456' } })
     fireEvent.change(screen.getByLabelText('Confirm password'), { target: { value: '123456' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save password' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('too weak')
+    expect(await screen.findByRole('alert')).toHaveTextContent('stronger password')
     expect(screen.getByLabelText('New password')).toHaveValue('')
     expect(screen.getByLabelText('Confirm password')).toHaveValue('')
   })

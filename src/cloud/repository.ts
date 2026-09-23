@@ -5,6 +5,8 @@ import type {
 import { getCloudClient } from './client'
 import { normalizeItineraryLink } from '../itineraryLink'
 import { validateNotebookStampDesigns } from '../stampDesign'
+import { bounded } from './connection'
+import { validateCloudNotebook, type CloudNotebookMetadata } from '../offline/validation'
 
 export interface CloudTripSummary {
   id: string
@@ -68,6 +70,7 @@ export interface CloudPhotoEntry extends PhotoEntry {
 }
 
 export type CloudAppData = Omit<AppData, 'photos'> & { photos: CloudPhotoEntry[] }
+export type StructuredCloudAppData = Omit<AppData, 'photos'> & { photos: CloudPhotoEntry[] }
 
 export interface CollaborationStatus {
   role: 'owner' | 'editor'
@@ -111,25 +114,102 @@ export async function createFreshTrip(client: SupabaseClient = getCloudClient())
   return data
 }
 
-export async function loadCloudNotebook(tripId: string, client: SupabaseClient = getCloudClient()): Promise<CloudAppData> {
-  const { data, error } = await client.rpc('load_notebook_v6', { p_trip_id: tripId })
+function linkedController(parent?: AbortSignal) {
+  const controller = new AbortController()
+  const abort = () => controller.abort(parent?.reason)
+  if (parent?.aborted) abort()
+  else parent?.addEventListener('abort', abort, { once:true })
+  return {
+    controller,
+    dispose:() => parent?.removeEventListener('abort', abort),
+  }
+}
+
+export async function loadCloudNotebookMetadata(
+  tripId: string,
+  client: SupabaseClient = getCloudClient(),
+  signal?: AbortSignal,
+): Promise<CloudNotebookMetadata> {
+  const linked = linkedController(signal)
+  const query = client.rpc('load_notebook_v6', { p_trip_id: tripId })
+  const abortable = 'abortSignal' in query && typeof query.abortSignal === 'function'
+    ? query.abortSignal(linked.controller.signal)
+    : query
+  let response
+  try { response = await bounded(abortable, linked.controller) }
+  finally { linked.dispose() }
+  const { data, error } = response
   if (error) throw cloudSchemaError(error)
   if (!data || typeof data !== 'object') throw new Error('The server returned an invalid notebook.')
-  const notebook = data as Omit<AppData, 'photos'> & {
-    photos: Array<Omit<PhotoEntry, 'blob'> & { storagePath?: string }>
+  validateCloudNotebook(data, tripId)
+  validateNotebookStampDesigns(data as unknown as AppData)
+  return data
+}
+
+function reusablePhoto(photo: CloudNotebookMetadata['photos'][number], candidates: PhotoEntry[]): CloudPhotoEntry | undefined {
+  const candidate = candidates.find(candidate => {
+    const cloud = candidate as CloudPhotoEntry
+    return cloud.id === photo.id && cloud.storagePath === photo.storagePath &&
+      cloud.size === photo.size && cloud.mimeType === photo.mimeType &&
+      cloud.blob instanceof Blob && cloud.blob.size === photo.size && cloud.blob.type === photo.mimeType
+  }) as CloudPhotoEntry | undefined
+  return candidate ? { ...photo, blob:candidate.blob } : undefined
+}
+
+function structuredNotebook(metadata: CloudNotebookMetadata, photos: CloudPhotoEntry[]): StructuredCloudAppData {
+  return { ...metadata, photos }
+}
+
+export async function hydrateCloudPhotos(
+  metadata: CloudNotebookMetadata,
+  client: SupabaseClient,
+  reusable: PhotoEntry[] = [],
+  onPhoto?: (photo: CloudPhotoEntry) => void,
+  signal?: AbortSignal,
+): Promise<CloudAppData> {
+  const photos = new Array<CloudPhotoEntry>(metadata.photos.length)
+  const missing: number[] = []
+  metadata.photos.forEach((photo, index) => {
+    const existing = reusablePhoto(photo, reusable)
+    if (existing) photos[index] = existing
+    else missing.push(index)
+  })
+  let cursor = 0
+  const worker = async () => {
+    while (cursor < missing.length) {
+      const index = missing[cursor++]
+      const photo = metadata.photos[index]
+      const linked = linkedController(signal)
+      let response
+      try {
+        response = await bounded(
+          client.storage.from('trip-photos').download(
+            photo.storagePath, {}, { signal: linked.controller.signal, cache: 'no-store' },
+          ),
+          linked.controller,
+        )
+      } finally { linked.dispose() }
+      const { data: blob, error } = response
+      if (error) throw error
+      if (!(blob instanceof Blob) || blob.size !== photo.size) throw new Error(`Photo "${photo.id}" has the wrong size.`)
+      if (blob.type !== photo.mimeType) throw new Error(`Photo "${photo.id}" has the wrong MIME type.`)
+      const complete = { ...photo, blob }
+      photos[index] = complete
+      onPhoto?.(complete)
+    }
   }
-  if (!Array.isArray(notebook.photos)) throw new Error('The server returned invalid photo metadata.')
-  validateNotebookStampDesigns(notebook)
-  const photos: CloudPhotoEntry[] = []
-  for (const photo of notebook.photos) {
-    const extension = photo.mimeType === 'image/png' ? 'png' : photo.mimeType === 'image/webp' ? 'webp' : 'jpg'
-    const storagePath = photo.storagePath ?? `${tripId}/${photo.id}.${extension}`
-    const { data: blob, error: photoError } = await client.storage.from('trip-photos').download(storagePath)
-    if (photoError) throw photoError
-    if (blob.size !== photo.size) throw new Error(`Photo "${photo.id}" has the wrong size.`)
-    photos.push({ ...photo, storagePath, blob })
-  }
-  return { ...notebook, photos }
+  await Promise.all(Array.from({ length: Math.min(3, missing.length) }, worker))
+  return structuredNotebook(metadata, photos)
+}
+
+export async function loadCloudNotebook(
+  tripId: string,
+  client: SupabaseClient = getCloudClient(),
+  reusable: PhotoEntry[] = [],
+  signal?: AbortSignal,
+): Promise<CloudAppData> {
+  const metadata = await loadCloudNotebookMetadata(tripId, client, signal)
+  return hydrateCloudPhotos(metadata, client, reusable, undefined, signal)
 }
 
 const clean = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
@@ -144,6 +224,7 @@ function cloudSchemaError(error: { code?: string; message: string }): Error | ty
 export class CloudNotebookRepository {
   readonly tripId: string
   private readonly client: SupabaseClient
+  private photos: CloudPhotoEntry[] = []
 
   constructor(
     tripId: string,
@@ -154,7 +235,31 @@ export class CloudNotebookRepository {
     this.client = client
   }
 
-  load() { return loadCloudNotebook(this.tripId, this.client) }
+  async load(reusable: PhotoEntry[] = this.photos) {
+    const notebook = await loadCloudNotebook(this.tripId, this.client, reusable)
+    this.photos = notebook.photos
+    return notebook
+  }
+
+  async loadProgressive(
+    reusable: PhotoEntry[],
+    onStructured: (notebook: StructuredCloudAppData) => void,
+    onPhoto?: (photo: CloudPhotoEntry) => void,
+    signal?: AbortSignal,
+  ) {
+    const metadata = await loadCloudNotebookMetadata(this.tripId, this.client, signal)
+    const retained = metadata.photos
+      .map(photo => reusablePhoto(photo, reusable))
+      .filter((photo): photo is CloudPhotoEntry => Boolean(photo))
+    this.photos = retained
+    onStructured(structuredNotebook(metadata, retained))
+    const notebook = await hydrateCloudPhotos(metadata, this.client, retained, photo => {
+      this.photos = [...this.photos.filter(candidate => candidate.id !== photo.id), photo]
+      onPhoto?.(photo)
+    }, signal)
+    this.photos = notebook.photos
+    return notebook
+  }
 
   private async reloadAcknowledged(acknowledgement: MutationAcknowledgement, cleanupWarning?: string): Promise<MutationResult> {
     try {
@@ -248,6 +353,13 @@ export class CloudNotebookRepository {
     const bucket = this.client.storage.from('trip-photos')
     const upload = await bucket.upload(objectPath, photo.blob, { contentType: photo.mimeType, upsert: false })
     if (upload.error) throw upload.error
+    this.photos = [...this.photos.filter(candidate => candidate.id !== photo.id), {
+      ...photo,
+      size:photo.blob.size,
+      storagePath:objectPath,
+      createdAt:'',
+      updatedAt:'',
+    }]
     try {
       return await this.write('photo.create', {
         photo: photoMutationPayload(photo, objectPath),
@@ -271,6 +383,13 @@ export class CloudNotebookRepository {
       upsert: false,
     })
     if (upload.error) throw upload.error
+    this.photos = [...this.photos.filter(candidate => candidate.id !== newPhoto.id), {
+      ...newPhoto,
+      size:newPhoto.blob.size,
+      storagePath:newObjectPath,
+      createdAt:'',
+      updatedAt:'',
+    }]
     let result: MutationResult
     try {
       result = await this.write('photo.replace', {

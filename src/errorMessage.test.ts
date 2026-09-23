@@ -1,16 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { errorMessage } from './errorMessage'
 
-describe('save error messages', () => {
-  it('preserves PostgreSQL errors returned as plain objects by Supabase', () => {
+describe('safe user error guidance', () => {
+  it('does not expose PostgreSQL details returned by Supabase', () => {
     expect(errorMessage({
       message: 'constraint "itinerary_parent_guard" does not exist',
       code: '42704', details: null, hint: null,
-    }, 'Retry')).toBe('constraint "itinerary_parent_guard" does not exist (42704)')
+    }, 'Try saving again.')).toBe('Try saving again.')
   })
 
-  it('preserves ordinary errors and safely handles malformed failures', () => {
-    expect(errorMessage(new Error('Offline'), 'Retry')).toBe('Offline')
+  it('turns recognizable failures into actions and safely handles malformed failures', () => {
+    expect(errorMessage(new Error('Offline'), 'Retry')).toBe('Check your connection and try again.')
+    expect(errorMessage(new Error('Storage quota exceeded'), 'Retry')).toBe('Free some storage on this device, then try again.')
+    expect(errorMessage(new Error('Invalid login credentials'), 'Retry')).toBe('Check your email and password, then try again.')
     for (const value of [null, undefined, {}, { message: 5 }, { message: '' }]) {
       expect(errorMessage(value, 'Retry')).toBe('Retry')
     }

@@ -1,17 +1,19 @@
-.stamp-picker { min-width: 0; margin: 2px 0; padding: 12px; border: 1px solid #ddd1ba; border-radius: 12px; background: #fffaf0; }
+.stamp-picker { min-width: 0; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; column-gap: 8px; margin: 0 0 12px; padding: 7px 10px; border: 1px solid #ddd1ba; border-radius: 10px; background: #fffaf0; }
 .stamp-picker legend { padding: 0 6px; color: #28262a; font-size: 12px; font-weight: 700; }
-.stamp-picker-preview { display: flex; align-items: center; gap: 16px; }
-.stamp-picker-preview > svg { width: 108px; height: 109px; flex-shrink: 0; }
+.stamp-picker-preview { min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.stamp-picker-preview > svg { width: 42px; height: 43px; flex-shrink: 0; }
 .stamp-picker-preview > div { min-width: 0; }
-.stamp-picker-preview strong { font: 600 18px/1.2 Georgia, serif; color: #006b72; }
-.stamp-picker-preview p, .stamp-picker-hint { margin: 6px 0 0; color: #6a6258; font: 12px/1.5 "Avenir Next", "Trebuchet MS", sans-serif; }
-.stamp-picker-options summary { min-height: 44px; padding: 12px 0 8px; color: #006b72; font-size: 13px; font-weight: 700; cursor: pointer; }
-.stamp-picker-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.stamp-picker-preview strong { font: 600 14px/1.2 Georgia, serif; color: #006b72; }
+.stamp-picker-preview p { display: none; }
+.stamp-picker-hint { margin: 6px 0 0; color: #6a6258; font: 10px/1.35 "Avenir Next", "Trebuchet MS", sans-serif; }
+.stamp-picker-options summary { min-height: 44px; display: flex; align-items: center; padding: 0 4px; color: #006b72; font-size: 11px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.stamp-picker-options[open] { grid-column: 1 / -1; width: 100%; }
+.stamp-picker-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
 .stamp-picker-option { position: relative; min-width: 0; cursor: pointer; }
 .stamp-picker-option input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-.stamp-picker-option > span { display: grid; place-items: center; gap: 4px; min-height: 72px; padding: 8px 3px; border: 1px solid #ddd1ba; border-radius: 7px; }
-.stamp-picker-option > span > svg { width: 43px; height: 32px; }
-.stamp-picker-option > span > span { font-size: 10px; line-height: 1.2; text-align: center; }
+.stamp-picker-option > span { display: grid; place-items: center; gap: 2px; min-height: 52px; padding: 5px 2px; border: 1px solid #ddd1ba; border-radius: 7px; }
+.stamp-picker-option > span > svg { width: 29px; height: 23px; }
+.stamp-picker-option > span > span { font-size: 9px; line-height: 1.1; text-align: center; }
 .stamp-picker-option input:checked + span { outline: 2px solid currentColor; outline-offset: -2px; background: #fff4de; }
 .stamp-picker-option input:focus-visible + span { outline: 3px solid #28262a; outline-offset: 2px; }
 .stamp-picker:disabled { opacity: .65; }

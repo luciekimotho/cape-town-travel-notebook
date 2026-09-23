@@ -18,8 +18,8 @@ export function MomentPostcard({ name, date, caption, photo, stampKind, onOpen }
   return <button type="button" className="postcard" onClick={onOpen}>
     <span className="postcard-visual">
       {photo ?? <PlaceScene name={name}/>}
-      <PostcardStamp name={name} date={date} stampKind={stampKind}/>
     </span>
+    <PostcardStamp name={name} date={date} stampKind={stampKind}/>
     <small className="postcard-caption">{caption}</small>
   </button>
 }

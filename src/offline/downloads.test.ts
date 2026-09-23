@@ -86,6 +86,63 @@ describe('private complete downloaded trips', () => {
     expect(await reopened.get('user-b', 'trip-a')).toBeUndefined()
   })
 
+  it('repairs a missing locator only when exactly one validated snapshot exists', async () => {
+    const expected = await savedCopy()
+    await inspectDatabase(async db => { await db.table('control').put({ key:'state', generation:crypto.randomUUID() }) })
+    downloads.close()
+    const reopened = new OfflineDownloads({ databaseName:name })
+    connections.push(reopened)
+    expect(await reopened.getActive()).toEqual(expected)
+    expect(await inspectDatabase(db => db.table('control').get('state'))).toMatchObject({
+      identity:{ userId:'user-a', tripId:'trip-a' },
+    })
+  })
+
+  it('atomically promotes a complete verified live notebook without another network request', async () => {
+    await downloads.rememberAccount('user-a', 'trip-a')
+    const complete = await savedCopy()
+    await downloads.remove('user-a', 'trip-a')
+    const promoted = await downloads.promote('user-a', 'trip-a', complete.notebook)
+    expect(promoted).toMatchObject({ source:'automatic', userId:'user-a', tripId:'trip-a' })
+    expect(await downloads.getActive()).toEqual(promoted)
+  })
+
+  it('reports storage persistence honestly when granted, denied, or unsupported', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, 'storage')
+    try {
+      Object.defineProperty(navigator, 'storage', {
+        configurable:true,
+        value:{ persisted:vi.fn().mockResolvedValue(false), persist:vi.fn().mockResolvedValue(false) },
+      })
+      expect(await downloads.persistenceStatus()).toBe('denied')
+      expect(await downloads.requestPersistence()).toBe('denied')
+      Object.defineProperty(navigator, 'storage', { configurable:true, value:undefined })
+      expect(await downloads.persistenceStatus()).toBe('unsupported')
+      expect(await downloads.requestPersistence()).toBe('unsupported')
+    } finally {
+      if (descriptor) Object.defineProperty(navigator, 'storage', descriptor)
+      else Object.defineProperty(navigator, 'storage', { configurable:true, value:undefined })
+    }
+  })
+
+  it('does not let a stalled persistence request block an explicit download', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, 'storage')
+    vi.useFakeTimers()
+    try {
+      Object.defineProperty(navigator, 'storage', {
+        configurable:true,
+        value:{ persist:()=>new Promise<boolean>(() => {}) },
+      })
+      const request = downloads.requestPersistence()
+      await vi.advanceTimersByTimeAsync(1_501)
+      await expect(request).resolves.toBe('unsupported')
+    } finally {
+      vi.useRealTimers()
+      if (descriptor) Object.defineProperty(navigator, 'storage', descriptor)
+      else Object.defineProperty(navigator, 'storage', { configurable:true, value:undefined })
+    }
+  })
+
   it('returns undefined for no remembered identity or no completed copy', async () => {
     expect(await downloads.getActive()).toBeUndefined()
     await downloads.rememberAccount('user-a', 'trip-a')
@@ -339,7 +396,7 @@ describe('private complete downloaded trips', () => {
     const first = await downloads.getActive()
     await downloads.download('user-a', 'trip-a', mockClient().client)
     await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(2), { interval: 5 })
-    expect((await downloads.getActive())!.revision).not.toBe(first!.revision)
+    expect((await downloads.getActive())!.revision).toBe(first!.revision)
     expect(listener.mock.calls).toEqual([[], []])
     unsubscribe()
   })

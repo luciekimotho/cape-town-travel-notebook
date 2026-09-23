@@ -28,12 +28,12 @@ Manual exchange rates and ZIP backup/restore are available from the Settings but
 
 ## Install and offline use
 
-On the deployed HTTPS site, use the browser's **Add to Home Screen** or **Install app** action. While online and signed in, open **Settings → Downloaded trip → Download for offline use**. Wait until a successful download time appears before going offline. The copy includes all five notebook sections and the actual saved photo files, not temporary image URLs.
+On the deployed HTTPS site, use the browser's **Add to Home Screen** or **Install app** action. A complete successful live load automatically keeps a validated last-known-good copy in that browser context. Open **Settings → Offline copy → Download for offline use** inside the installed app to verify every photo and request persistent browser storage. Wait until **Offline copy ready** appears before going offline. The copy includes all five notebook sections and actual saved photo files, not temporary image URLs.
 
 Downloaded trips are **read-only**: no edits, stamps, checklist updates, expense changes,
 photo changes, restore, or sharing changes are queued. Google Maps needs a connection.
-Choose **Update download** online to replace the copy; a failed or interrupted refresh
-keeps the last complete download. **Remove downloaded copy** deletes only this device's
+Choose **Verify photos for offline use** online to refresh the guaranteed copy; a failed or interrupted refresh
+keeps the last complete copy. **Remove downloaded copy** deletes only this device's
 copy, not the shared trip.
 
 Downloads are private, unencrypted device storage, isolated by the last verified
@@ -49,9 +49,12 @@ open; the app never silently retries the write. You can explicitly open the save
 download instead. Once reconnected and verified, choose the live trip before editing.
 
 The PWA service worker caches only app assets; private trip records and photos are
-kept in a separate IndexedDB download database. The legacy browser-only notebook is
-not replaced. Browser eviction or clearing site data can remove downloads—keep ZIP
-backups too. First-time offline use without a complete download cannot show a trip.
+kept in a separate IndexedDB database. Online startup displays a matching saved copy
+immediately while account and membership checks refresh it in the background. Safari
+and an installed iPhone PWA can use separate storage contexts, so perform the offline
+verification inside the installed app. Browser eviction or clearing site data can
+still remove copies even when persistence was requested—keep ZIP backups too.
+First-time offline use without a complete copy cannot show a trip.
 Downloads use the existing stamp-aware RPCs from migration `0004`; this feature
 requires no additional SQL migration.
 Real iPhone/Android acceptance is still required; desktop simulation is not device

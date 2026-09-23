@@ -7,7 +7,8 @@ import { CLOUD_WAIT_MS } from './connection'
 const mocks = vi.hoisted(() => ({
   currentSession: vi.fn(), claimSharedTrip: vi.fn(), listCloudTrips: vi.fn(), getUser: vi.fn(),
   getActive: vi.fn(), get: vi.fn(), rememberAccount: vi.fn(), invalidateOtherUsers: vi.fn(),
-  invalidateUser: vi.fn(), clearAll: vi.fn(), remove: vi.fn(), download: vi.fn(), signOut: vi.fn(), load: vi.fn(),
+  invalidateUser: vi.fn(), clearAll: vi.fn(), remove: vi.fn(), download: vi.fn(), promote: vi.fn(),
+  persistenceStatus: vi.fn(), requestPersistence: vi.fn(), signOut: vi.fn(), load: vi.fn(),
   callback: undefined as undefined | ((event: string, session: Session | null) => void),
   inCallback: false, editorOpen: false, settingsOpen: false, unsubscribe: vi.fn(), application: vi.fn(),
   cacheListener: undefined as undefined | (() => void), initialCacheNotification: false, unsubscribeCache: vi.fn(),
@@ -48,14 +49,22 @@ vi.mock('./client', () => ({
   } }),
 }))
 vi.mock('./notebookStore', () => ({ CloudNotebookStore: class {
-  kind = 'cloud'; readOnly = false; load = mocks.load
+  kind = 'cloud'; readOnly = false; onSnapshot?: (notebook: object) => void
+  load = mocks.load
+  async loadProgressive(_client: unknown, onStructured: (notebook: object) => void) {
+    const notebook = await mocks.load()
+    onStructured(notebook)
+    this.onSnapshot?.(notebook)
+    return notebook
+  }
 } }))
 vi.mock('../offline/store', () => ({ DownloadedNotebookStore: class { kind = 'download'; readOnly = true } }))
 vi.mock('../offline/downloads', () => ({
   offlineDownloads: {
     getActive: mocks.getActive, get: mocks.get, rememberAccount: mocks.rememberAccount,
     invalidateOtherUsers: mocks.invalidateOtherUsers, invalidateUser: mocks.invalidateUser,
-    clearAll: mocks.clearAll, remove: mocks.remove, download: mocks.download,
+    clearAll: mocks.clearAll, remove: mocks.remove, download: mocks.download, promote: mocks.promote,
+    persistenceStatus: mocks.persistenceStatus, requestPersistence: mocks.requestPersistence,
     subscribe: (listener: () => void) => {
       mocks.cacheListener = listener
       if (mocks.initialCacheNotification) queueMicrotask(listener)
@@ -100,6 +109,11 @@ beforeEach(() => {
   mocks.listCloudTrips.mockResolvedValue([{ id: 'existing-trip', role: 'owner' }])
   mocks.getActive.mockResolvedValue(undefined)
   mocks.load.mockResolvedValue({})
+  mocks.promote.mockImplementation(async (_userId: string, _tripId: string, notebook: object) => ({
+    ...snapshot, notebook, source:'automatic',
+  }))
+  mocks.persistenceStatus.mockResolvedValue('denied')
+  mocks.requestPersistence.mockResolvedValue('denied')
 })
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.useRealTimers() })
 
@@ -150,6 +164,22 @@ describe('auth session completion', () => {
 })
 
 describe('trusted offline downloads', () => {
+  it('renders a matching saved trip before an unresolved online auth request', async () => {
+    mocks.currentSession.mockReturnValue(new Promise(() => {}))
+    mocks.getActive.mockResolvedValue(snapshot)
+    render(<CloudApp/>)
+    await screen.findByRole('heading', { name: 'Downloaded itinerary' })
+    expect(screen.getByText('Read only')).toBeInTheDocument()
+    expect(mocks.getUser).not.toHaveBeenCalled()
+  })
+
+  it('automatically promotes a complete verified live load for the next startup', async () => {
+    mocks.currentSession.mockResolvedValue(session)
+    render(<CloudApp/>)
+    await screen.findByRole('heading', { name: 'Existing shared itinerary' })
+    await waitFor(() => expect(mocks.promote).toHaveBeenCalledWith('traveller', 'existing-trip', {}))
+  })
+
   it('opens the trusted offline snapshot when subscription emits its initial baseline during startup', async () => {
     connection(false)
     mocks.initialCacheNotification = true
@@ -262,7 +292,7 @@ describe('trusted offline downloads', () => {
     mocks.getActive.mockRejectedValue(new Error('IndexedDB blocked'))
     render(<CloudApp/>)
     await screen.findByRole('alert')
-    expect(screen.getByRole('alert')).toHaveTextContent('IndexedDB blocked')
+    expect(screen.getByRole('alert')).toHaveTextContent('refresh the offline copy')
   })
 
   it('retains the live store when connection drops, verifies reconnect, and explicitly returns from download', async () => {
@@ -378,7 +408,7 @@ describe('trusted offline downloads', () => {
     render(<CloudApp/>)
     await screen.findByText('Editing enabled')
     act(() => screen.getByText('Download').click())
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Photo download failed'))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Check your connection and try again'))
     expect(screen.getByText(snapshot.savedAt)).toBeInTheDocument()
   })
 
@@ -389,7 +419,7 @@ describe('trusted offline downloads', () => {
     render(<CloudApp/>)
     await screen.findByText('Downloaded itinerary')
     act(() => screen.getByText('Sign out').click())
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Sign out could not be completed'))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('try signing out again'))
     expect(screen.getByText('Downloaded itinerary')).toBeInTheDocument()
   })
 
@@ -405,8 +435,8 @@ describe('trusted offline downloads', () => {
     act(() => screen.getByText('Sign out').click())
     await screen.findByText('No downloaded trip on this device')
     expect(screen.queryByText('Downloaded itinerary')).not.toBeInTheDocument()
-    expect(screen.getByRole('alert')).toHaveTextContent('Sign out could not be completed')
-    expect(screen.getByRole('alert')).toHaveTextContent('SDK signout network unavailable')
+    expect(screen.getByRole('alert')).toHaveTextContent('try signing out again')
+    expect(screen.getByRole('alert')).not.toHaveTextContent('SDK')
   })
 
   it('removing the open downloaded snapshot shows the no-copy screen only after acknowledgement', async () => {
@@ -426,7 +456,7 @@ describe('trusted offline downloads', () => {
     render(<CloudApp/>)
     await screen.findByText('Downloaded itinerary')
     act(() => screen.getByText('Remove').click())
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Storage removal denied'))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Try removing the offline copy again'))
     expect(screen.getByText('Downloaded itinerary')).toBeInTheDocument()
   })
 
@@ -500,7 +530,7 @@ describe('trusted offline downloads', () => {
     mocks.getActive.mockRejectedValue(new Error('Storage no longer accessible'))
     act(() => mocks.cacheListener?.())
     await screen.findByText('No downloaded trip on this device')
-    expect(screen.getByRole('alert')).toHaveTextContent('Storage no longer accessible')
+    expect(screen.getByRole('alert')).toHaveTextContent('refresh the offline copy')
   })
 
   it('ignores a notification read that finishes after logout', async () => {

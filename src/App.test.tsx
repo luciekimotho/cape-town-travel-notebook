@@ -9,13 +9,24 @@ beforeEach(async () => {
   await db.delete()
   await db.open()
 })
+
+it('lists itinerary children by time before their stored drag position', async () => {
+  await initializeDatabase()
+  await db.items.update('dated-item-arrival-waterfront-0', { time:'12:00', position:0 })
+  await db.items.update('dated-item-arrival-waterfront-1', { time:'09:00', position:1 })
+  await renderApp()
+  const group = screen.getByRole('group', { name:'Arrival & V&A Waterfront stops' })
+  const labels = within(group).getAllByRole('button').map(button => button.textContent)
+  expect(labels[0]).toContain('Check in')
+  expect(labels[1]).toContain('Arrive in Cape Town')
+})
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
 })
 
 async function renderApp() {
-  render(<App />)
+  render(<App clock={() => new Date('2026-09-21T08:00:00Z')}/>)
   await screen.findByRole('heading', { name: 'Capetown 2026' })
 }
 
@@ -93,7 +104,7 @@ describe('current itinerary focus', () => {
     const store = { ...localNotebookStore, kind: 'download' as const, readOnly: true }
     render(<NotebookApplication store={store} initialData={notebook} clock={() => new Date('2026-09-22T08:00:00Z')}/>)
     expect(screen.getAllByRole('button', { current: 'time' })).toHaveLength(1)
-    expect(screen.getByText('Downloaded trip · read-only')).toBeInTheDocument()
+    expect(screen.getByText('Offline copy · read-only')).toBeInTheDocument()
   })
 })
 
@@ -258,7 +269,7 @@ describe('unified activity form', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add activity' }))
     const dialog = screen.getByRole('dialog', { name: 'Add activity' })
     fireEvent.change(within(dialog).getByLabelText('Name *'), { target: { value: 'Our sunset picnic' } })
-    fireEvent.change(within(dialog).getByLabelText('Activity or map link'), { target: { value: 'https://www.getyourguide.com/cape-town-l103/example-t123/' } })
+    fireEvent.change(within(dialog).getByLabelText('Link'), { target: { value: 'https://www.getyourguide.com/cape-town-l103/example-t123/' } })
     fireEvent.click(within(dialog).getByText('Choose a design'))
     expect(within(dialog).getByRole('radio', { name: 'Default' })).toBeChecked()
     fireEvent.click(within(dialog).getByRole('radio', { name: 'Lighthouse' }))
@@ -300,7 +311,7 @@ describe('unified activity form', () => {
     vi.spyOn(localNotebookStore, 'saveItineraryDetails').mockRejectedValueOnce({ message: 'Save rejected by server', code: '42501' })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save activity' }))
     await screen.findByRole('alert')
-    expect(screen.getByRole('alert')).toHaveTextContent('Save rejected by server (42501)')
+    expect(screen.getByRole('alert')).toHaveTextContent('could not be saved')
     expect(within(dialog).getByRole('radio', { name: 'Penguins' })).toBeChecked()
     fireEvent.keyDown(document, { key: 'Escape' })
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
@@ -344,9 +355,14 @@ describe('unified activity form', () => {
     await renderApp()
     fireEvent.click(screen.getByRole('button', { name: 'Add activity' }))
     const dialog = screen.getByRole('dialog', { name: 'Add activity' })
-    for (const label of ['Name *','Parent activity','Day','Time','Activity or map link','Cost','Currency','Booking status','Address','Google Maps URL','Notes']) {
+    for (const label of ['Name *','Parent activity','Day','Time','Link','Cost','Currency','Booking status','Notes']) {
       expect(within(dialog).getByLabelText(label)).toBeInTheDocument()
     }
+    expect(within(dialog).queryByLabelText('Address')).not.toBeInTheDocument()
+    expect(dialog.querySelectorAll('input[type="url"]')).toHaveLength(1)
+    const metaRow = within(dialog).getByLabelText('Parent activity').closest('.activity-meta-row')
+    expect(metaRow).toContainElement(within(dialog).getByLabelText('Booking status'))
+    expect(metaRow?.querySelector('.stamp-picker')).toBeNull()
     const fields = within(dialog).getAllByRole('textbox').concat(within(dialog).getAllByRole('combobox')).concat(within(dialog).getAllByRole('spinbutton'))
     expect(fields.filter(field => field.hasAttribute('required'))).toEqual([within(dialog).getByLabelText('Name *')])
     expect(within(dialog).getByRole('button', { name: 'Save activity' })).toHaveAttribute('title', 'Save activity')
@@ -374,7 +390,7 @@ describe('unified activity form', () => {
     fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'Keep this draft' } })
     fireEvent.change(screen.getByLabelText('Cost'), { target: { value: '500' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save activity' }))
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Activity write failed'))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('could not be saved'))
     expect(screen.getByRole('dialog', { name: 'Add activity' })).toBeInTheDocument()
     expect(screen.getByLabelText('Name *')).toHaveValue('Draft day')
     expect(screen.getByLabelText('Notes')).toHaveValue('Keep this draft')
@@ -544,6 +560,27 @@ describe('form persistence and cancellation', () => {
     fireEvent.click(screen.getByRole('button', { name:'Activate rates' }))
     await waitFor(async () => expect(await db.rateSets.filter(rate => rate.active).count()).toBe(1))
     expect(await db.rateSets.filter(rate => rate.active && rate.kesPerUsd === 130 && rate.kesPerZar === 7.1).count()).toBe(1)
+  })
+
+  it('shows accessible save progress and blocks duplicate form submission', async () => {
+    await initializeDatabase()
+    const next = await loadData()
+    let resolve!: (value: typeof next) => void
+    const pending = new Promise<typeof next>(done => { resolve = done })
+    const save = vi.spyOn(localNotebookStore, 'saveExpense').mockReturnValue(pending)
+    await renderApp()
+    fireEvent.click(screen.getByRole('button', { name:'Costs' }))
+    fireEvent.click(screen.getByRole('button', { name:'Add expense' }))
+    fireEvent.change(screen.getByLabelText('Amount *'), { target:{ value:'900' } })
+    fireEvent.change(screen.getByLabelText('Category'), { target:{ value:'Transport' } })
+    fireEvent.click(screen.getByRole('button', { name:'Save expense' }))
+    const saving = screen.getByRole('button', { name:'Saving…' })
+    expect(saving).toBeDisabled()
+    expect(saving).toHaveAttribute('aria-busy', 'true')
+    fireEvent.click(saving)
+    expect(save).toHaveBeenCalledOnce()
+    await act(async () => resolve(next))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
   it('saves and cancels the Moment photo form without losing the stored photo', async () => {

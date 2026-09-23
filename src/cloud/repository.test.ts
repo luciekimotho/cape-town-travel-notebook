@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AppData } from '../types'
 import { CloudNotebookRepository, createFreshTrip, listCloudTrips, loadCloudNotebook } from './repository'
+import { metadataFixture } from '../offline/test-fixtures'
 
 describe('cloud repository', () => {
   it('creates the fresh Cape Town notebook through the server bootstrap', async () => {
@@ -19,13 +20,8 @@ describe('cloud repository', () => {
   })
 
   it('downloads private photo bytes and validates their recorded size', async () => {
-    const notebook = {
-      schemaVersion:4,
-      trip:{ id:'current', destination:'Cape Town', travellers:2, startDate:'2026-09-21', endDate:'2026-09-28', timezone:'Africa/Johannesburg', notes:'', updatedAt:'2026-01-01' },
-      checklist:[], days:[], items:[], places:[], activityTemplates:[], expenses:[], stamps:[],
-      photos:[{ id:'photo-1', stampId:'stamp-1', caption:'View', mimeType:'image/jpeg', width:10, height:10, size:4, storagePath:'trip-1/photo-1-version.jpg', createdAt:'2026-01-01', updatedAt:'2026-01-01' }],
-      rateSets:[], metadata:[],
-    }
+    const notebook = metadataFixture()
+    notebook.photos = [{ ...notebook.photos[0], id:'photo-1', storagePath:'trip-1/photo-1-version.jpg' }]
     const blob = new Blob(['test'], { type:'image/jpeg' })
     const client = {
       rpc:async()=>({ data:notebook, error:null }),
@@ -35,12 +31,57 @@ describe('cloud repository', () => {
     expect(loaded.photos[0]).toMatchObject({ id:'photo-1', storagePath:'trip-1/photo-1-version.jpg', blob })
   })
 
+  it('publishes structured notebook data before a slow photo download completes', async () => {
+    const notebook = metadataFixture()
+    let release!: (value: { data:Blob; error:null }) => void
+    const photo = new Promise<{ data:Blob; error:null }>(resolve => { release = resolve })
+    const onStructured = vi.fn()
+    const client = {
+      rpc:async()=>({ data:notebook, error:null }),
+      storage:{ from:()=>({ download:()=>photo }) },
+    } as unknown as SupabaseClient
+    const loading = new CloudNotebookRepository('trip-a', client).loadProgressive([], onStructured)
+    await vi.waitFor(() => expect(onStructured).toHaveBeenCalledOnce())
+    expect(onStructured.mock.calls[0][0].photos).toEqual([])
+    release({ data:new Blob(['test'], { type:'image/jpeg' }), error:null })
+    await expect(loading).resolves.toMatchObject({ photos:[{ id:'photo-a', blob:expect.any(Blob) }] })
+  })
+
+  it('reuses immutable versioned photo bytes without downloading them again', async () => {
+    const notebook = metadataFixture()
+    const download = vi.fn()
+    const cached = { ...notebook.photos[0], blob:new Blob(['test'], { type:'image/jpeg' }) }
+    const client = {
+      rpc:async()=>({ data:notebook, error:null }),
+      storage:{ from:()=>({ download }) },
+    } as unknown as SupabaseClient
+    const loaded = await loadCloudNotebook('trip-a', client, [cached])
+    expect(download).not.toHaveBeenCalled()
+    expect(loaded.photos[0].blob).toBe(cached.blob)
+  })
+
+  it('cancels in-flight photo hydration when the startup lifecycle is aborted', async () => {
+    const notebook = metadataFixture()
+    let received: AbortSignal | undefined
+    const client = {
+      rpc:async()=>({ data:notebook, error:null }),
+      storage:{ from:()=>({ download:(_path:string, _options:object, parameters?:{signal?:AbortSignal}) => {
+        received = parameters?.signal
+        return new Promise((_resolve, reject) => received?.addEventListener('abort', () =>
+          reject(new DOMException('Cancelled', 'AbortError')), { once:true }))
+      } }) },
+    } as unknown as SupabaseClient
+    const controller = new AbortController()
+    const loading = loadCloudNotebook('trip-a', client, [], controller.signal)
+    await vi.waitFor(() => expect(received).toBeDefined())
+    controller.abort()
+    await expect(loading).rejects.toMatchObject({ name:'AbortError' })
+    expect(received?.aborted).toBe(true)
+  })
+
   it('rejects corrupt private photo bytes', async () => {
-    const notebook = {
-      trip:{}, checklist:[], days:[], items:[], places:[], activityTemplates:[], expenses:[], stamps:[],
-      photos:[{ id:'photo-1', stampId:'stamp-1', caption:'', mimeType:'image/png', width:1, height:1, size:20, createdAt:'2026-01-01', updatedAt:'2026-01-01' }],
-      rateSets:[], metadata:[],
-    }
+    const notebook = metadataFixture()
+    notebook.photos = [{ ...notebook.photos[0], id:'photo-1', size:20, storagePath:'trip-1/photo-1-version.jpg' }]
     const client = {
       rpc:async()=>({ data:notebook,error:null }),
       storage:{ from:()=>({ download:async()=>({data:new Blob(['bad']),error:null}) }) },
@@ -68,6 +109,24 @@ describe('cloud repository', () => {
       {name:'mutate_notebook_v3',args:{p_trip_id:'trip-1',p_operation:'checklist.toggle',p_payload:{id:'todo-1'}}},
       {name:'load_notebook_v6',args:{p_trip_id:'trip-1'}},
     ])
+  })
+
+  it('does not redownload unchanged private photos after an acknowledged save', async () => {
+    const notebook = metadataFixture()
+    const download = vi.fn().mockResolvedValue({
+      data:new Blob(['test'], { type:'image/jpeg' }),
+      error:null,
+    })
+    const client = {
+      rpc:async(name:string)=>name === 'mutate_notebook_v3'
+        ? { data:{ ok:true, operation:'checklist.update', id:'check-a' }, error:null }
+        : { data:notebook, error:null },
+      storage:{ from:()=>({ download }) },
+    } as unknown as SupabaseClient
+    const repository = new CloudNotebookRepository('trip-a', client)
+    await repository.load()
+    await repository.updateChecklist('check-a', { completed:false })
+    expect(download).toHaveBeenCalledOnce()
   })
 
   it('does not reload an unacknowledged write', async () => {
@@ -273,7 +332,7 @@ describe('cloud repository', () => {
           return {data:{ok:true,operation:'notebook.restore',objectPaths:['trip-1/old.jpg'],counts:{photos:1}},error:null}
         }
         order.push('reload')
-        return {data:{...restoreData,photos:[]},error:null}
+        return {data:{...restoreData,schemaVersion:4,photos:[]},error:null}
       },
       storage:{from:()=>bucket},
     } as unknown as SupabaseClient
@@ -310,7 +369,7 @@ describe('cloud repository', () => {
             ? {data:null,error:new Error('validation failed')}
             : {data:{ok:true,operation:'notebook.restore',objectPaths:[]},error:null}
         }
-        return {data:{...restoreData,photos:[]},error:null}
+        return {data:{...restoreData,schemaVersion:4,photos:[]},error:null}
       },
       storage:{from:()=>bucket},
     } as unknown as SupabaseClient
